@@ -1,0 +1,14 @@
+/data/logs/nginx/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+    sharedscripts
+    postrotate
+        docker ps -q --filter label=com.docker.compose.project=cctv --filter label=com.docker.compose.service=nginx \
+          | xargs -r -I{} docker exec {} nginx -s reopen >/dev/null 2>&1 || true
+    endscript
+}

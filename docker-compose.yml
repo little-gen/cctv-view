@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: planoscamaras-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: planos
+      POSTGRES_PASSWORD: planos
+      POSTGRES_DB: planos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U planos"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

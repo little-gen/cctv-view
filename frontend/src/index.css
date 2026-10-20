@@ -1,0 +1,63 @@
+@import 'tailwindcss';
+
+/* Tema oscuro tipo GIS / gestión de infraestructuras */
+@theme {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-page: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-surface-2: #232322;
+  --color-surface-3: #2c2c2a;
+  --color-line: #383835;
+  --color-ink: #f0efec;
+  --color-ink-2: #c3c2b7;
+  --color-muted: #898781;
+  --color-accent: #3987e5;
+  --color-accent-strong: #2a78d6;
+
+  /* Estados (reservados: siempre con icono/etiqueta) */
+  --color-ok: #0ca30c;
+  --color-warn: #fab219;
+  --color-crit: #d03b3b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Componentes base (con @utility para poder combinarlos y usar variantes) */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-accent-strong text-white hover:bg-accent;
+}
+@utility btn-ghost {
+  @apply btn text-ink-2 hover:bg-surface-3 hover:text-ink;
+}
+@utility btn-danger {
+  @apply btn bg-crit/15 text-red-300 hover:bg-crit/25;
+}
+@utility input {
+  @apply w-full rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-sm text-ink placeholder:text-muted focus:border-accent focus:outline-none disabled:opacity-60;
+}
+@utility label {
+  @apply mb-1 block text-xs font-medium text-ink-2;
+}
+@utility panel {
+  @apply rounded-lg border border-line bg-surface;
+}
+@utility chip {
+  @apply inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs text-ink-2 transition-colors;
+}
+@utility chip-on {
+  @apply border-accent bg-accent/15 text-ink;
+}

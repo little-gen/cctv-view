@@ -1,0 +1,51 @@
+# Reglas visibles en Prometheus (Alerts) y Grafana. Para recibir avisos por correo o
+# Telegram, configurar Grafana Alerting o Uptime Kuma (notificaciones de disponibilidad).
+groups:
+  - name: cctv
+    rules:
+      - alert: BackupAntiguo
+        expr: time() - cctv_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "La última copia de seguridad correcta tiene más de 26 h"
+
+      - alert: BackupFallido
+        expr: cctv_backup_success == 0
+        labels: { severity: critical }
+        annotations:
+          summary: "La última copia de seguridad ha fallado (docker compose logs backup)"
+
+      - alert: DiscoDatosCasiLleno
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/data"} / node_filesystem_size_bytes{mountpoint="/data"}) > 0.85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "/data supera el 85% de ocupación"
+
+      - alert: DiscoSistemaCasiLleno
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 0.85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "El disco del sistema supera el 85% (¿imágenes Docker antiguas? docker system prune)"
+
+      - alert: MemoriaAlta
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Uso de memoria por encima del 90%"
+
+      - alert: PostgresCaido
+        expr: pg_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "PostgreSQL no responde"
+
+      - alert: ContenedorReiniciandose
+        expr: changes(container_start_time_seconds{container_label_com_docker_compose_service!=""}[15m]) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "El contenedor {{ $labels.container_label_com_docker_compose_service }} se reinicia repetidamente"

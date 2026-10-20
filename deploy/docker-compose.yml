@@ -1,0 +1,185 @@
+# =============================================================================
+# PlanosCámaras · stack de producción
+#   cd /opt/cctv/deploy && docker compose up -d
+# Monitorización opcional:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+# =============================================================================
+name: cctv
+
+x-common: &common
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+  environment: &tz
+    TZ: ${TZ:-Europe/Madrid}
+
+services:
+  # ------------------------------------------------------------ PostgreSQL
+  postgres:
+    <<: *common
+    image: postgres:17-alpine
+    environment:
+      <<: *tz
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    # Ajustes para una VM de 8 GB con SSD (escalar shared_buffers ≈ 25% de la RAM)
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=60
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - wal_compression=on
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - log_min_duration_statement=1000
+    shm_size: 256m
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------- Backend
+  backend:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    image: cctv-backend:${APP_VERSION:-latest}
+    environment:
+      <<: *tz
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PG_POOL_MAX: 20
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      CORS_ORIGIN: https://${DOMAIN}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      PLANS_DIR: /data/plans
+      UPLOADS_DIR: /data/uploads
+      DOCUMENTS_DIR: /data/documents
+      STORAGE_DIR: /data/uploads/legacy
+    volumes:
+      - ${DATA_DIR:-/data}/plans:/data/plans
+      - ${DATA_DIR:-/data}/uploads:/data/uploads
+      - ${DATA_DIR:-/data}/documents:/data/documents
+    # Sistema de ficheros de solo lectura: solo escribe en /data/* y /tmp
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [app, db]
+
+  # -------------------------------------------------------------- Frontend
+  frontend:
+    <<: *common
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    image: cctv-frontend:${APP_VERSION:-latest}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    networks: [app]
+
+  # ---------------------------------------------- Nginx (reverse proxy + TLS)
+  nginx:
+    <<: *common
+    image: nginx:1.30-alpine
+    environment:
+      <<: *tz
+      DOMAIN: ${DOMAIN}
+    # Procesa las plantillas (envsubst) y recarga cada 6 h para tomar los certificados renovados
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["(while :; do sleep 6h; nginx -s reload; done) & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ${DATA_DIR:-/data}/letsencrypt:/etc/letsencrypt:ro
+      - ${DATA_DIR:-/data}/certbot-www:/var/www/certbot:ro
+      - ${DATA_DIR:-/data}/logs/nginx:/var/log/nginx
+    depends_on:
+      backend: { condition: service_healthy }
+      frontend: { condition: service_healthy }
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/nginx-health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ------------------------------------------- Let's Encrypt (renovación)
+  certbot:
+    <<: *common
+    image: certbot/certbot:v5.8.0
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    volumes:
+      - ${DATA_DIR:-/data}/letsencrypt:/etc/letsencrypt
+      - ${DATA_DIR:-/data}/certbot-www:/var/www/certbot
+    networks: [app]
+
+  # --------------------------------------------- Copias de seguridad (cron)
+  backup:
+    <<: *common
+    build: ./backup
+    image: cctv-backup:latest
+    environment:
+      <<: *tz
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 3 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_FILES: ${BACKUP_FILES:-true}
+      BACKUP_FILES_RETENTION_DAYS: ${BACKUP_FILES_RETENTION_DAYS:-14}
+    volumes:
+      - ${DATA_DIR:-/data}/backups:/backups
+      - ${DATA_DIR:-/data}/plans:/data/plans:ro
+      - ${DATA_DIR:-/data}/uploads:/data/uploads:ro
+      - ${DATA_DIR:-/data}/documents:/data/documents:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [db]
+
+volumes:
+  # Volumen Docker con nombre, almacenado en el disco de datos (/data/postgres)
+  pgdata:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-/data}/postgres
+
+networks:
+  app: {}
+  # Red interna: la BD no tiene salida a Internet ni es accesible desde nginx/frontend
+  db:
+    internal: true

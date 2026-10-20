@@ -1,0 +1,7 @@
+# Los scripts y configuraciones que se ejecutan en Linux deben mantener LF
+* text=auto
+*.sh text eol=lf
+deploy/** text eol=lf
+**/Dockerfile text eol=lf
+*.conf text eol=lf
+*.template text eol=lf

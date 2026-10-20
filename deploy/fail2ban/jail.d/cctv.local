@@ -1,0 +1,37 @@
+# fail2ban · PlanosCámaras
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+bantime.increment = true
+bantime.maxtime = 1w
+# Añade aquí la red de administración para no bloquearla nunca
+ignoreip = 127.0.0.1/8 ::1
+
+# SSH (Debian 12 registra en journald, no en /var/log/auth.log)
+[sshd]
+enabled = true
+backend = systemd
+maxretry = 5
+
+# Fuerza bruta contra el login de la aplicación (401 en POST /api/auth/login)
+# El tráfico llega a nginx por Docker (cadena FORWARD): el bloqueo va en DOCKER-USER.
+[cctv-login]
+enabled = true
+filter = cctv-login
+logpath = /data/logs/nginx/access.log
+backend = auto
+maxretry = 8
+findtime = 15m
+bantime = 2h
+action = iptables-multiport[name=cctv-login, port="http,https", protocol=tcp, chain=DOCKER-USER]
+
+# Clientes que superan reiteradamente el límite de peticiones de nginx (429)
+[cctv-ratelimit]
+enabled = true
+filter = cctv-ratelimit
+logpath = /data/logs/nginx/access.log
+backend = auto
+maxretry = 30
+findtime = 5m
+bantime = 1h
+action = iptables-multiport[name=cctv-ratelimit, port="http,https", protocol=tcp, chain=DOCKER-USER]

@@ -1,0 +1,402 @@
+openapi: 3.1.0
+info:
+  title: PlanosCamaras API
+  version: 0.1.0
+  description: |
+    API REST para la gestión de cámaras de videovigilancia sobre planos de naves industriales.
+
+    **Autenticación**: `POST /api/auth/login` devuelve un JWT. Enviarlo en `Authorization: Bearer <token>`.
+
+    **Roles**: `admin` (todo), `tecnico` (edición de planos, cámaras, NVR y adjuntos), `lectura` (consulta y exportación).
+
+    **Coordenadas**: `pos_x`/`pos_y` normalizadas 0..1 respecto a la imagen del plano. `rotation_deg`: 0° = derecha, sentido horario.
+servers:
+  - url: /api
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Usuarios
+  - name: Proyectos
+  - name: Planos
+  - name: NVR
+  - name: Cámaras
+  - name: Adjuntos
+  - name: Exportación
+  - name: Auditoría
+  - name: Búsqueda
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Iniciar sesión
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Token y usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Usuario actual
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+
+  /users:
+    get: { tags: [Usuarios], summary: Listar usuarios (admin), responses: { '200': { description: OK } } }
+    post:
+      tags: [Usuarios]
+      summary: Crear usuario (admin)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, password, role]
+              properties:
+                email: { type: string }
+                name: { type: string }
+                password: { type: string, minLength: 8 }
+                role: { $ref: '#/components/schemas/Role' }
+      responses: { '201': { description: Creado } }
+  /users/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    patch: { tags: [Usuarios], summary: Modificar usuario (admin), responses: { '200': { description: OK } } }
+    delete: { tags: [Usuarios], summary: Desactivar usuario (admin), responses: { '204': { description: Desactivado } } }
+
+  /projects:
+    get:
+      tags: [Proyectos]
+      summary: Listar proyectos con contadores
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Project' } } } } } }
+    post:
+      tags: [Proyectos]
+      summary: Crear proyecto (admin)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/ProjectInput' } } } }
+      responses: { '201': { description: Creado } }
+  /projects/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Proyectos], summary: Proyecto con sus planos, responses: { '200': { description: OK } } }
+    patch: { tags: [Proyectos], summary: Modificar proyecto (admin), responses: { '200': { description: OK } } }
+    delete: { tags: [Proyectos], summary: Eliminar proyecto (admin), responses: { '204': { description: Eliminado } } }
+  /projects/{id}/stats:
+    parameters:
+      - { $ref: '#/components/parameters/id' }
+      - { name: floorPlanId, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [Proyectos]
+      summary: Estadísticas (total, por estado, por tipo, por marca)
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Stats' } } } } }
+
+  /projects/{id}/plans:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    post:
+      tags: [Planos]
+      summary: Crear plano (sin imagen)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                width_m: { type: number, description: Ancho real en metros que representa la imagen }
+      responses: { '201': { description: Creado } }
+  /plans/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    patch: { tags: [Planos], summary: Modificar nombre/escala, responses: { '200': { description: OK } } }
+    delete: { tags: [Planos], summary: Eliminar plano y sus cámaras (admin), responses: { '204': { description: Eliminado } } }
+  /plans/{id}/image:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get:
+      tags: [Planos]
+      summary: Imagen vigente del plano
+      responses: { '200': { description: Imagen, content: { image/png: {}, image/jpeg: {} } } }
+    put:
+      tags: [Planos]
+      summary: Subir o sustituir la imagen (las cámaras se conservan)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary, description: PNG o JPEG }
+      responses: { '200': { description: Plano actualizado; incluye `warning` si cambia la proporción } }
+  /plans/{id}/images:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Planos], summary: Histórico de versiones de imagen, responses: { '200': { description: OK } } }
+
+  /projects/{id}/nvrs:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [NVR], summary: Listar NVR del proyecto, responses: { '200': { description: OK } } }
+    post:
+      tags: [NVR]
+      summary: Crear NVR
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/NvrInput' } } } }
+      responses: { '201': { description: Creado } }
+  /nvrs/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    patch: { tags: [NVR], summary: Modificar NVR, responses: { '200': { description: OK } } }
+    delete: { tags: [NVR], summary: Eliminar NVR, responses: { '204': { description: Eliminado } } }
+
+  /projects/{id}/cameras:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get:
+      tags: [Cámaras]
+      summary: Listar/filtrar cámaras
+      parameters:
+        - { name: floorPlanId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, description: 'Lista separada por comas', schema: { type: string, example: 'operativa,averiada' } }
+        - { name: type, in: query, schema: { type: string, example: 'domo,ptz' } }
+        - { name: brand, in: query, schema: { type: string, example: 'hikvision,axis' } }
+        - { name: q, in: query, description: Busca en nombre, código e IP, schema: { type: string } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Camera' } } } } } }
+    post:
+      tags: [Cámaras]
+      summary: Crear cámara (código y nombre se autogeneran si se omiten)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/CameraInput' } } } }
+      responses: { '201': { description: Creada } }
+  /cameras/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Cámaras], summary: Ficha de cámara, responses: { '200': { description: OK } } }
+    patch:
+      tags: [Cámaras]
+      summary: Modificar cámara (parcial)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/CameraInput' } } } }
+      responses: { '200': { description: OK } }
+    delete: { tags: [Cámaras], summary: Eliminar cámara, responses: { '204': { description: Eliminada } } }
+  /cameras/{id}/history:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Cámaras], summary: Historial de cambios de la cámara, responses: { '200': { description: OK } } }
+
+  /cameras/{id}/attachments:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Adjuntos], summary: Fotos y documentos de la cámara, responses: { '200': { description: OK } } }
+    post:
+      tags: [Adjuntos]
+      summary: Subir fotos/documentos
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files: { type: array, items: { type: string, format: binary } }
+                kind: { type: string, enum: [foto, documento] }
+                description: { type: string }
+      responses: { '201': { description: Creados } }
+  /attachments/{id}/file:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Adjuntos], summary: Descargar fichero, responses: { '200': { description: Fichero } } }
+  /attachments/{id}:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    delete: { tags: [Adjuntos], summary: Eliminar adjunto, responses: { '204': { description: Eliminado } } }
+
+  /plans/{id}/export/pdf:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Exportación], summary: Plano con cámaras y conos en PDF (A3), responses: { '200': { description: PDF, content: { application/pdf: {} } } } }
+  /projects/{id}/export/report.pdf:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Exportación], summary: Informe técnico de todas las cámaras, responses: { '200': { description: PDF, content: { application/pdf: {} } } } }
+  /projects/{id}/export/inventory.xlsx:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    get: { tags: [Exportación], summary: Inventario en Excel, responses: { '200': { description: XLSX } } }
+
+  /search:
+    get:
+      tags: [Búsqueda]
+      summary: Búsqueda global de cámaras en todos los proyectos
+      description: |
+        Palabras separadas por espacios (todas deben aparecer), coincidencia parcial, sin distinguir
+        mayúsculas ni acentos. Campos: nombre, código, IP, MAC, marca, modelo, NVR, ubicación,
+        observaciones y nombre del proyecto. Resultados agrupados por proyecto.
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100, example: 'hik almacen' } }
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: type, in: query, schema: { type: string, example: 'ptz,lpr' } }
+        - { name: status, in: query, schema: { type: string, example: averiada } }
+        - { name: brand, in: query, schema: { type: string, example: 'axis,dahua' } }
+        - { name: nvrId, in: query, schema: { type: string, format: uuid } }
+        - { name: perProject, in: query, schema: { type: integer, default: 8, maximum: 200 } }
+        - { name: limit, in: query, schema: { type: integer, default: 150, maximum: 500 } }
+      responses:
+        '200':
+          description: Resultados, estadísticas y facetas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  projectCount: { type: integer }
+                  byType: { type: object, additionalProperties: { type: integer } }
+                  byStatus: { type: object, additionalProperties: { type: integer } }
+                  shown: { type: integer }
+                  truncated: { type: boolean }
+                  tookMs: { type: integer }
+                  groups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project: { type: object, properties: { id: { type: string }, name: { type: string } } }
+                        hits: { type: integer }
+                        cameras: { type: array, items: { $ref: '#/components/schemas/SearchHit' } }
+                  facets:
+                    type: object
+                    properties:
+                      projects: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, count: { type: integer } } } }
+                      brands: { type: array, items: { type: object, properties: { brand: { type: string }, count: { type: integer } } } }
+                      nvrs: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, project_name: { type: string }, count: { type: integer } } } }
+
+  /audit:
+    get:
+      tags: [Auditoría]
+      summary: Registro de auditoría (admin)
+      parameters:
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: entityType, in: query, schema: { type: string } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: before, in: query, description: Paginación (id), schema: { type: integer } }
+      responses: { '200': { description: OK } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              details: {}
+  schemas:
+    Role: { type: string, enum: [admin, tecnico, lectura] }
+    CameraType: { type: string, enum: [domo, bullet, ptz, termica, lpr] }
+    CameraStatus: { type: string, enum: [operativa, averiada, mantenimiento] }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+    ProjectInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        client: { type: [string, 'null'] }
+        address: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+    Project:
+      allOf:
+        - $ref: '#/components/schemas/ProjectInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            plan_count: { type: integer }
+            camera_count: { type: integer }
+            broken_count: { type: integer }
+    NvrInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        brand: { type: [string, 'null'] }
+        model: { type: [string, 'null'] }
+        ip_address: { type: [string, 'null'] }
+        channels: { type: [integer, 'null'] }
+        location: { type: [string, 'null'] }
+        notes: { type: [string, 'null'] }
+    CameraInput:
+      type: object
+      required: [floor_plan_id, type, pos_x, pos_y]
+      properties:
+        floor_plan_id: { type: string, format: uuid }
+        nvr_id: { type: [string, 'null'], format: uuid }
+        code: { type: string, example: CAM-001 }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/CameraType' }
+        brand: { type: [string, 'null'] }
+        model: { type: [string, 'null'] }
+        ip_address: { type: [string, 'null'], example: 192.168.1.64 }
+        mac_address: { type: [string, 'null'] }
+        resolution: { type: [string, 'null'], example: 4MP }
+        physical_location: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/CameraStatus' }
+        installed_at: { type: [string, 'null'], format: date }
+        notes: { type: [string, 'null'] }
+        pos_x: { type: number, minimum: 0, maximum: 1 }
+        pos_y: { type: number, minimum: 0, maximum: 1 }
+        rotation_deg: { type: number, description: '0 = derecha, sentido horario' }
+        fov_deg: { type: number, maximum: 360 }
+        range_m: { type: number }
+        onvif_url: { type: [string, 'null'] }
+        onvif_username: { type: [string, 'null'] }
+    Camera:
+      allOf:
+        - $ref: '#/components/schemas/CameraInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            project_id: { type: string, format: uuid }
+            nvr_name: { type: [string, 'null'] }
+            attachment_count: { type: integer }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    SearchHit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        project_name: { type: string }
+        floor_plan_id: { type: string, format: uuid }
+        plan_name: { type: string }
+        code: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/CameraType' }
+        status: { $ref: '#/components/schemas/CameraStatus' }
+        ip_address: { type: [string, 'null'] }
+        physical_location: { type: [string, 'null'] }
+        brand: { type: [string, 'null'] }
+        model: { type: [string, 'null'] }
+        nvr_name: { type: [string, 'null'] }
+        notes: { type: [string, 'null'], description: Primeros 300 caracteres }
+    Stats:
+      type: object
+      properties:
+        total: { type: integer }
+        operativas: { type: integer }
+        averiadas: { type: integer }
+        mantenimiento: { type: integer }
+        byType: { type: array, items: { type: object, properties: { type: { type: string }, count: { type: integer } } } }
+        byBrand: { type: array, items: { type: object, properties: { brand: { type: string }, count: { type: integer } } } }

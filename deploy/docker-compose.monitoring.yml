@@ -1,0 +1,107 @@
+# =============================================================================
+# Monitorización opcional: Prometheus + Grafana + Uptime Kuma
+# (+ node-exporter, cAdvisor y postgres-exporter como fuentes de métricas)
+#
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+#   echo 1 > .monitoring      # para que update.sh también lo actualice
+#
+# Los paneles se publican en ${MONITORING_BIND} (127.0.0.1 por defecto):
+#   ssh -L 3000:127.0.0.1:3000 -L 3001:127.0.0.1:3001 -L 9090:127.0.0.1:9090 deploy@vm
+# =============================================================================
+
+x-mon: &mon
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  prometheus:
+    <<: *mon
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=8GB
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - ${DATA_DIR:-/data}/monitoring/prometheus:/prometheus
+    ports:
+      - "${MONITORING_BIND:-127.0.0.1}:9090:9090"
+    networks: [monitoring]
+
+  grafana:
+    <<: *mon
+    image: grafana/grafana:12.4.13
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      # Sin descargas de plugins al arrancar (Loki, Pyroscope...): no se usan
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${DATA_DIR:-/data}/monitoring/grafana:/var/lib/grafana
+    ports:
+      - "${MONITORING_BIND:-127.0.0.1}:3000:3000"
+    depends_on: [prometheus]
+    networks: [monitoring]
+
+  uptime-kuma:
+    <<: *mon
+    image: louislam/uptime-kuma:2.5.6
+    volumes:
+      - ${DATA_DIR:-/data}/monitoring/uptime-kuma:/app/data
+    ports:
+      - "${MONITORING_BIND:-127.0.0.1}:3001:3001"
+    # Red "app" para comprobar también los servicios internos (http://backend:4000/api/health)
+    networks: [monitoring, app]
+
+  # ------------------------------------------------- fuentes de métricas
+  node-exporter:
+    <<: *mon
+    image: prom/node-exporter:v1.12.1
+    command:
+      - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($|/)
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+      # Métricas de las copias de seguridad que escribe backup.sh
+      - ${DATA_DIR:-/data}/backups/metrics:/textfile:ro
+    networks: [monitoring]
+
+  cadvisor:
+    <<: *mon
+    image: ghcr.io/google/cadvisor:v0.60.6
+    privileged: true
+    devices: [/dev/kmsg]
+    command: [--docker_only=true, --housekeeping_interval=30s, --store_container_labels=false, "--whitelisted_container_labels=com.docker.compose.service"]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks: [monitoring]
+
+  postgres-exporter:
+    <<: *mon
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_USER: monitoring
+      DATA_SOURCE_PASS: ${POSTGRES_EXPORTER_PASSWORD}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [monitoring, db]
+
+networks:
+  monitoring: {}

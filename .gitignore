@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+backend/storage/
+deploy/.monitoring
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+.env.*
+!.env.example
+*.pem
+*.key

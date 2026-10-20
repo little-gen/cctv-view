@@ -1,0 +1,21 @@
+{
+  "name": "planos-camaras",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gestión y documentación de cámaras de videovigilancia sobre planos de naves industriales",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "db:up": "docker compose up -d db",
+    "db:migrate": "npm run migrate -w backend",
+    "db:seed": "npm run seed -w backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
