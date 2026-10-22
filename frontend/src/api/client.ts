@@ -42,6 +42,10 @@ async function request(path: string, { method = 'GET', body, form, signal }: Req
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    // Contraseña temporal pendiente de cambio: la app muestra la pantalla de cambio
+    if (res.status === 403 && data.details?.code === 'PASSWORD_CHANGE_REQUIRED') {
+      window.dispatchEvent(new Event('auth:password-change'));
+    }
     throw new ApiError(res.status, data.error ?? statusMessage(res.status), data.details);
   }
   return res;
@@ -49,7 +53,13 @@ async function request(path: string, { method = 'GET', body, form, signal }: Req
 
 // Errores sin cuerpo JSON (p. ej. los genera nginx antes de llegar a la API)
 const statusMessage = (status: number) =>
-  status === 413 ? 'El fichero supera el tamaño máximo que acepta el servidor' : status === 0 ? 'Error de red' : `Error ${status}`;
+  status === 413
+    ? 'El fichero supera el tamaño máximo que acepta el servidor'
+    : status === 429
+      ? 'Demasiados intentos seguidos. Espera un minuto y vuelve a intentarlo.'
+      : status === 0
+        ? 'Error de red'
+        : `Error ${status}`;
 
 /**
  * Subida con progreso (fetch no informa del progreso de envío). `onProgress` recibe 0..1;

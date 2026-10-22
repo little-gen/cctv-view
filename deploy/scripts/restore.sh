@@ -11,8 +11,12 @@
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
-DATA_DIR=${DATA_DIR:-/data}
+# Lee variables de .env sin ejecutarlo como shell (valores como "0 3 * * *" romperían un "source")
+env_get() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d '"'"'"'\r'; }
+DATA_DIR=$(env_get DATA_DIR); DATA_DIR=${DATA_DIR:-/data}
+POSTGRES_DB=$(env_get POSTGRES_DB)
+POSTGRES_USER=$(env_get POSTGRES_USER)
+[ -n "$POSTGRES_DB" ] && [ -n "$POSTGRES_USER" ] || { echo "Faltan POSTGRES_DB / POSTGRES_USER en .env" >&2; exit 1; }
 BK="$DATA_DIR/backups"
 COMPOSE=(docker compose)
 

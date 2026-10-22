@@ -15,6 +15,7 @@ import {
 } from '@/api/hooks';
 import { useAuth } from '@/auth/AuthContext';
 import { ErrorText } from '@/components/ui/Modal';
+import { AUDIT_ACTION_LABEL } from '@/lib/audit';
 import { CAMERA_STATUS, CAMERA_STATUS_KEYS, CAMERA_TYPE_KEYS, CAMERA_TYPES } from '@/lib/cameraTypes';
 import { useEditor } from '@/store/editorStore';
 import type { Attachment, Camera, CameraInput } from '@/types';
@@ -297,7 +298,7 @@ function PhotoThumb({ att, canDelete, onDelete }: { att: Attachment; canDelete: 
 const formatSize = (b: number) => (b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.ceil(b / 1e3)} KB`);
 
 // ------------------------------------------------------------- Historial
-const ACTION_LABEL = { create: 'Alta', update: 'Modificación', delete: 'Baja', login: 'Acceso', export: 'Exportación' };
+
 
 function HistoryTab({ cameraId }: { cameraId: string }) {
   const { data, isLoading } = useCameraHistory(cameraId);
@@ -308,7 +309,7 @@ function HistoryTab({ cameraId }: { cameraId: string }) {
       {data.map((h) => (
         <li key={h.id} className="border-l-2 border-line pl-3 text-sm">
           <div className="flex justify-between text-xs text-muted">
-            <span>{ACTION_LABEL[h.action]} · {h.entity_type === 'attachment' ? 'adjunto' : 'cámara'}</span>
+            <span>{AUDIT_ACTION_LABEL[h.action]} · {h.entity_type === 'attachment' ? 'adjunto' : 'cámara'}</span>
             <time>{new Date(h.occurred_at).toLocaleString('es-ES')}</time>
           </div>
           <div className="text-ink-2">{h.user_name ?? 'Sistema'}</div>

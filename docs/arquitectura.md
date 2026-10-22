@@ -52,7 +52,11 @@
 
 ## Seguridad
 
-- Contraseñas con bcrypt; JWT firmado (HS256) con caducidad configurable. En producción el servidor no arranca con el secreto por defecto.
+- **Contraseñas**: bcrypt de coste 12; los hashes antiguos se actualizan al iniciar sesión. Política de al menos 12 caracteres, sin palabras obvias ni el propio usuario. Las contraseñas que fija el administrador son temporales: el usuario debe cambiarlas al entrar.
+- **Sesiones**: JWT HS256 con caducidad (8 h) y versión de sesión. En cada petición se comprueba en la BD (con una caché de 5 s) que el usuario sigue activo y que la versión coincide. Cambiar la contraseña, el rol o el estado, restablecer el acceso o cerrar sesión invalida todos sus tokens. El rol se lee de la BD, no del token.
+- **Bloqueo por cuenta**: tras 5 fallos seguidos, 1 min, y duplicando con cada fallo hasta 60 min. A esto se suman el límite por IP de nginx (5 por minuto) y fail2ban. Para no revelar qué cuentas existen, se ejecuta bcrypt también cuando el email no existe.
+- **Restablecimiento de acceso por el administrador**: enlace de un solo uso con caducidad de 24 h. Solo se guarda el hash SHA-256 del token, y el token va en el fragmento `#` de la URL, así que no llega a los logs.
+- En producción el servidor no arranca con un `JWT_SECRET` por defecto o corto.
 - Autorización por rol en cada ruta (`requireRole`). Matriz:
 
 | Acción | admin | tecnico | lectura |
@@ -65,9 +69,12 @@
 | Usuarios y auditoría global | ✔ | — | — |
 
 - Validación estricta de entrada (Zod) y SQL siempre parametrizado; las columnas de los `UPDATE` salen de listas blancas.
-- Subidas: lista blanca de MIME, límite de tamaño, nombres de fichero generados (UUID) y protección contra *path traversal*. Descargas con `X-Content-Type-Options: nosniff`.
-- Helmet (cabeceras seguras) y CORS restringido al origen del frontend.
-- Pendiente para producción: *rate limiting* del login, refresh tokens/revocación, HTTPS en el proxy inverso, antivirus de adjuntos y permisos por proyecto si hay clientes distintos.
+- **Subidas**: el tipo se comprueba por **contenido** (firma del fichero con `file-type`; los planos, decodificándolos con `sharp`) y se guarda el tipo real. Hay límites de tamaño, nombres generados (UUID) y protección contra *path traversal*. **Descargas**: solo las imágenes se muestran en el navegador; el resto se descarga como fichero (`attachment`). Todas llevan `nosniff` y una CSP `sandbox`.
+- **API**: `Cache-Control: no-store` (salvo las teselas, que son inmutables), CSP `default-src 'none'`, sin ETag, y Swagger desactivado en producción (`API_DOCS`). Los errores de cliente (JSON o multipart mal formado) devuelven 4xx, nunca 500.
+- **Base de datos**: la aplicación se conecta con el rol `cctv_app`, que no es superusuario ni puede cambiar el esquema. El registro de auditoría es de solo inserción para ese rol. Las migraciones usan el propietario.
+- **nginx**: límites específicos para login y contraseñas, exportaciones, subidas, descargas y teselas; `/api/health` solo desde `HEALTH_ALLOW`.
+- **Decisión de diseño (P-02)**: todos los usuarios son de Teku Systems y ven todos los proyectos; la autorización es por rol. Si en el futuro hay usuarios externos, harán falta permisos por proyecto.
+- Pendiente: token en cookie `HttpOnly` (L-01; la CSP estricta ya mitiga el robo por XSS), inicio de sesión con Entra ID y antivirus para adjuntos.
 
 ## Evolución prevista
 

@@ -31,5 +31,12 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
 
 export function ErrorText({ error }: { error: unknown }) {
   if (!error) return null;
-  return <p className="mt-2 text-sm text-red-300">{error instanceof Error ? error.message : String(error)}</p>;
+  // Errores de validación de la API: se muestran los motivos concretos
+  const details = (error as { details?: unknown }).details;
+  const reasons = Array.isArray(details) ? details.map((d: { message?: string }) => d.message).filter(Boolean) : [];
+  return (
+    <p className="mt-2 text-sm text-red-300" role="alert">
+      {reasons.length ? reasons.join('. ') : error instanceof Error ? error.message : String(error)}
+    </p>
+  );
 }

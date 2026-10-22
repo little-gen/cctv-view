@@ -51,6 +51,7 @@ export function LoginPage() {
         <button className="btn-primary w-full" disabled={busy}>
           {busy ? 'Entrando…' : 'Iniciar sesión'}
         </button>
+        <p className="text-center text-xs text-muted">¿Has olvidado tu contraseña? Pide al administrador que restablezca tu acceso.</p>
       </form>
     </div>
   );

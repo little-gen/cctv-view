@@ -65,12 +65,48 @@ server {
         proxy_pass http://cctv_backend;
     }
 
+    # Cambio y restablecimiento de contraseña: mismo límite que el login
+    location ~ ^/api/auth/(reset-password|change-password)$ {
+        limit_req zone=login burst=5 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://cctv_backend;
+    }
+
+    # Comprobación de salud: solo para monitorización (hallazgo L-02). El healthcheck de
+    # Docker y Uptime Kuma consultan el backend directamente por la red interna.
+    location = /api/health {
+        allow ${HEALTH_ALLOW};
+        deny all;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://cctv_backend;
+    }
+
+    # Exportaciones (PDF del plano, informe, inventario): caras en CPU/memoria
+    location ~ ^/api/(plans/[^/]+/export/|projects/[^/]+/export/) {
+        limit_req zone=exports burst=5 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_read_timeout 180s;
+        proxy_pass http://cctv_backend;
+    }
+
+    # Adjuntos: subida (y listado) y descarga
+    location ~ ^/api/cameras/[^/]+/attachments$ {
+        limit_req zone=uploads burst=20 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://cctv_backend;
+    }
+    location ~ ^/api/attachments/[^/]+/file$ {
+        limit_req zone=downloads burst=60 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://cctv_backend;
+    }
+
     # Subida de planos: ficheros grandes (escaneos, PNG de alta resolución) y unos segundos
     # de proceso en el servidor para generar los niveles de zoom
     location ~ ^/api/plans/[^/]+/image$ {
         client_max_body_size 210m;
         client_body_timeout 300s;
-        limit_req zone=api burst=60 nodelay;
+        limit_req zone=uploads burst=10 nodelay;
         include /etc/nginx/snippets/proxy.conf;
         proxy_send_timeout 300s;
         proxy_read_timeout 300s;
@@ -108,6 +144,6 @@ server {
         proxy_pass http://cctv_frontend;
         # add_header en un location anula los del server: se repiten las cabeceras + CSP
         include /etc/nginx/snippets/security-headers.conf;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
     }
 }

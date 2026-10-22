@@ -109,14 +109,11 @@ Let's Encrypt que renovar. `LETSENCRYPT_*` en `.env` no tienen efecto.
 
 ## 6. Pendiente
 
-- [ ] **Permiso de ejecución de los scripts en git.** Se subieron desde Windows con modo `100644`.
-      `cctv-update.service` ejecuta `update.sh` directamente y fallaría con *Permission denied*.
-      Desde el PC: `git update-index --chmod=+x deploy/scripts/*.sh deploy/backup/*.sh`, commit y
-      `git pull` en la VM.
-- [ ] **`restore.sh` (y `init-letsencrypt.sh`) cargan el `.env` con `. ./.env`**, que falla con
-      `BACKUP_SCHEDULE=0 3 * * *` (bash intenta ejecutar `3`). Corregir antes de necesitar una
-      restauración: leer las variables como `init-internal-cert.sh` (`env_get`) o poner comillas al
-      valor en `.env` y `.env.example`. Probarlo con `sudo ./scripts/restore.sh --list`.
+- [x] **Permiso de ejecución de los scripts en git** (commit `38c137b`).
+- [x] **`restore.sh` e `init-letsencrypt.sh` leen el `.env` con `env_get`** (ya no fallan con
+      `BACKUP_SCHEDULE=0 3 * * *`). Restauración completa probada. En la VM, tras actualizar:
+      `sudo ./scripts/restore.sh --list`.
+- [ ] Aplicar la actualización de seguridad de la auditoría (§ 8).
 - [ ] Resolver el acceso desde iPhone (§ 5).
 - [ ] Primera copia manual: `docker compose exec backup backup.sh`.
 - [ ] Activar la actualización automática: `sudo systemctl enable --now cctv-update.timer` (después
@@ -143,3 +140,60 @@ Let's Encrypt que renovar. `LETSENCRYPT_*` en `.env` no tienen efecto.
   Sistema: `qm disk resize 121 scsi0 +10G`, y `sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1`.
 - Consola de Proxmox: es serie (`serial0`); pulsar Enter para ver el login. `cctv_admin` no tiene
   contraseña salvo que se haya puesto con `qm set 121 --cipassword`.
+
+---
+
+## 8. Actualización de seguridad (auditoría del 22/10/2026)
+
+Corrige los hallazgos del informe de auditoría de caja negra. El detalle de cada punto está en
+[auditoria-2026-10-22.md](auditoria-2026-10-22.md). Es una migración de la base de datos (`003_security.sql`),
+así que `update.sh` hace una copia antes de aplicarla.
+
+1. **Variables nuevas en `.env`** (en la VM, una sola vez):
+   ```bash
+   cd /opt/cctv/deploy
+   {
+     echo
+     echo '# Seguridad (auditoría 22/10/2026)'
+     echo 'POSTGRES_APP_USER=cctv_app'
+     echo "POSTGRES_APP_PASSWORD=$(openssl rand -hex 32)"
+     echo 'API_DOCS=false'
+     echo 'HEALTH_ALLOW=127.0.0.1'
+   } >> .env
+   grep -E '^(POSTGRES_APP_USER|API_DOCS|HEALTH_ALLOW)=' .env
+   ```
+   - `POSTGRES_APP_*`: rol sin privilegios con el que se conectará la aplicación. Lo crea el backend
+     al arrancar; el propietario (`POSTGRES_USER`) queda solo para las migraciones y las copias.
+   - `HEALTH_ALLOW`: si Uptime Kuma u otra sonda consulta `https://cctv.tekusys.local/api/health`
+     desde fuera de la VM, pon aquí su IP o red (por ejemplo `10.10.32.0/23`).
+2. **Actualizar**: `./scripts/update.sh`.
+3. **Comprobar**:
+   ```bash
+   docker compose ps                                                     # todo healthy
+   docker compose logs backend | grep -E "003_security|rol de aplicación"
+   curl -sk -o /dev/null -w "%{http_code}\n" https://cctv.tekusys.local/api/openapi.json   # 401
+   curl -sk -o /dev/null -w "%{http_code}\n" https://cctv.tekusys.local/api/health         # 403 desde tu PC
+   sudo ./scripts/restore.sh --list
+   sudo fail2ban-client status cctv-login
+   ```
+4. **Efectos para los usuarios**:
+   - Todos deberán **volver a iniciar sesión** una vez, porque los tokens anteriores dejan de valer.
+   - Las contraseñas existentes siguen funcionando, aunque no cumplan la política nueva de al menos
+     12 caracteres. Para que todos elijan una contraseña conforme en su próximo acceso:
+     ```bash
+     docker compose exec postgres psql -U "$(grep ^POSTGRES_USER= .env | cut -d= -f2)" -d cctv \
+       -c "UPDATE users SET must_change_password = true WHERE active;"
+     ```
+5. **Contraseñas olvidadas**: *Usuarios → Restablecer acceso* genera un enlace de un solo uso, válido
+   24 h. El administrador se lo entrega al usuario por un canal privado. Generarlo cierra las sesiones
+   del usuario y le quita el bloqueo si lo tenía. Una cuenta bloqueada por intentos fallidos se puede
+   desbloquear con *Desbloquear*.
+6. **Segunda auditoría (con credenciales)**: hacerla sobre una **copia** de la VM (*Clone* en
+   Proxmox), no sobre producción, porque las pruebas crean usuarios y datos. En la copia:
+   ```bash
+   cd /opt/cctv/deploy
+   docker run --rm --user 0 --network cctv_db -v /opt/cctv/backend/scripts:/s:ro \
+     -e API_URL=http://backend:4000/api -e ADMIN_EMAIL='<admin>' -e ADMIN_PASSWORD='<contraseña>' \
+     -e APP_DATABASE_URL="postgres://cctv_app:$(grep ^POSTGRES_APP_PASSWORD= .env | cut -d= -f2)@postgres:5432/cctv" \
+     --entrypoint sh cctv-backend:latest -c 'cp /s/security-check.mjs /app/backend/sc.mjs && node /app/backend/sc.mjs'
+   ```

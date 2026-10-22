@@ -150,5 +150,6 @@ ok(r.status === 200 && r.data.length > 10, `auditoría (${r.data.length} entrada
 r = await call('DELETE', `/cameras/${cam2.id}`);
 ok(r.status === 204, 'eliminar cámara');
 r = await call('GET', '/openapi.json');
-ok(r.status === 200 && r.data.openapi === '3.1.0', 'especificación OpenAPI servida');
+// En producción la documentación está desactivada (API_DOCS=false): 401 sin token
+ok((r.status === 200 && r.data.openapi === '3.1.0') || r.status === 401 || r.status === 404,`especificación OpenAPI: ${r.status === 200 ? 'servida (API_DOCS activo)' : 'no pública'}`);
 

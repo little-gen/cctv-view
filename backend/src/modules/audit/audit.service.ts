@@ -1,7 +1,16 @@
 import type { Request } from 'express';
 import { pool, type Queryable } from '../../db/pool.js';
 
-export type AuditAction = 'create' | 'update' | 'delete' | 'login' | 'export';
+export type AuditAction =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'login'
+  | 'login_failed'
+  | 'logout'
+  | 'password_change'
+  | 'password_reset'
+  | 'export';
 
 interface AuditEntry {
   action: AuditAction;
@@ -9,6 +18,8 @@ interface AuditEntry {
   entityId?: string | null;
   projectId?: string | null;
   changes?: unknown;
+  /** Usuario afectado cuando la petición no está autenticada (login fallido, restablecimiento) */
+  actor?: { id?: string | null; email?: string | null };
 }
 
 /** Registra una entrada de auditoría. Pasar `db` para incluirla en una transacción. */
@@ -17,8 +28,8 @@ export async function audit(req: Request, entry: AuditEntry, db: Queryable = poo
     `INSERT INTO audit_log (user_id, user_email, action, entity_type, entity_id, project_id, changes, ip)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
-      req.user?.id ?? null,
-      req.user?.email ?? null,
+      req.user?.id ?? entry.actor?.id ?? null,
+      req.user?.email ?? entry.actor?.email ?? null,
       entry.action,
       entry.entityType,
       entry.entityId ?? null,

@@ -204,11 +204,43 @@ export function useDeleteAttachment(cameraId: string) {
 // -------------------------------------------------------- Usuarios / audit
 export const useUsers = () => useQuery({ queryKey: qk.users, queryFn: () => api<User[]>('/users') });
 
+/**
+ * Cuentas bloqueadas por intentos fallidos (aviso para el administrador en la cabecera).
+ * Comparte la caché de useUsers y se refresca cada minuto; solo se activa para administradores.
+ */
+export function useLockedUsers(enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: qk.users,
+    queryFn: () => api<User[]>('/users'),
+    enabled,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  return (data ?? []).filter((u) => u.locked_until && new Date(u.locked_until) > new Date());
+}
+
 export function useSaveUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...data }: Partial<User> & { password?: string }) =>
       id ? api<User>(`/users/${id}`, { method: 'PATCH', body: data }) : api<User>('/users', { method: 'POST', body: data }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  });
+}
+
+/** Genera un enlace de un solo uso para que el usuario elija contraseña (se muestra una vez). */
+export function useResetUserAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<{ url: string; email: string; expiresAt: string }>(`/users/${id}/reset-access`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  });
+}
+
+export function useUnlockUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<User>(`/users/${id}/unlock`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
   });
 }

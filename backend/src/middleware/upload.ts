@@ -28,5 +28,6 @@ function uploader(allowed: string[], maxBytes = config.maxUploadBytes, maxFiles 
 
 /** Planos: límite propio (PLAN_MAX_UPLOAD_MB), un único fichero. */
 export const planUpload = uploader(PLAN_MIME, config.planMaxUploadBytes, 1);
-export const attachmentUpload = uploader([...PHOTO_MIME, ...DOC_MIME]);
-export const isPhotoMime = (mime: string) => PHOTO_MIME.includes(mime);
+// Filtro previo por tipo declarado; el tipo real se comprueba por contenido (lib/fileType.ts).
+// application/octet-stream: algunos navegadores lo envían para .heic u otras extensiones.
+export const attachmentUpload = uploader([...PHOTO_MIME, ...DOC_MIME, 'application/octet-stream']);

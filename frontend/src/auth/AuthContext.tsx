@@ -6,7 +6,10 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  /** Cierra la sesión también en el servidor (invalida los tokens de este usuario) */
+  logout: () => Promise<void>;
+  /** Cambia la propia contraseña; el servidor devuelve un token nuevo para esta sesión */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** Puede crear/editar cámaras, planos, NVR y adjuntos */
   canEdit: boolean;
   isAdmin: boolean;
@@ -28,8 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onLogout = () => setUser(null);
+    // El servidor exige cambiar la contraseña (fijada por el administrador)
+    const onPasswordChange = () => setUser((u) => (u ? { ...u, mustChangePassword: true } : u));
     window.addEventListener('auth:logout', onLogout);
-    return () => window.removeEventListener('auth:logout', onLogout);
+    window.addEventListener('auth:password-change', onPasswordChange);
+    return () => {
+      window.removeEventListener('auth:logout', onLogout);
+      window.removeEventListener('auth:password-change', onPasswordChange);
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -38,9 +47,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await api<void>('/auth/logout', { method: 'POST' });
+    } catch {
+      // Sin conexión o sesión ya caducada: basta con olvidar el token local
+    }
     tokenStore.clear();
     setUser(null);
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const res = await api<{ token: string; user: User }>('/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword, newPassword },
+    });
+    tokenStore.set(res.token);
+    setUser(res.user);
   }, []);
 
   const value = useMemo<AuthState>(
@@ -49,10 +72,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       logout,
+      changePassword,
       canEdit: user?.role === 'admin' || user?.role === 'tecnico',
       isAdmin: user?.role === 'admin',
     }),
-    [user, loading, login, logout],
+    [user, loading, login, logout, changePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

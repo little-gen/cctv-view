@@ -1,6 +1,6 @@
 import { useAudit } from '@/api/hooks';
+import { AUDIT_ACTION_LABEL, auditDetail } from '@/lib/audit';
 
-const ACTION = { create: 'Alta', update: 'Modificación', delete: 'Baja', login: 'Acceso', export: 'Exportación' };
 const ENTITY: Record<string, string> = {
   camera: 'Cámara', floor_plan: 'Plano', project: 'Proyecto', nvr: 'NVR', attachment: 'Adjunto', user: 'Usuario',
 };
@@ -23,11 +23,11 @@ export function AuditPage() {
               <tr key={a.id} className="border-b border-line align-top last:border-0">
                 <td className="p-3 whitespace-nowrap text-ink-2 tabular-nums">{new Date(a.occurred_at).toLocaleString('es-ES')}</td>
                 <td className="p-3">{a.user_name ?? '—'}</td>
-                <td className="p-3">{ACTION[a.action]}</td>
+                <td className={`p-3 ${a.action === 'login_failed' ? 'text-red-300' : ''}`}>{AUDIT_ACTION_LABEL[a.action] ?? a.action}</td>
                 <td className="p-3">{ENTITY[a.entity_type] ?? a.entity_type}</td>
                 <td className="p-3 text-ink-2">{a.project_name ?? '—'}</td>
                 <td className="max-w-md p-3 text-xs text-muted">
-                  {a.action === 'update' && a.changes ? Object.keys(a.changes).join(', ') : summarize(a.changes)}
+                  {auditDetail(a)}
                 </td>
               </tr>
             ))}
@@ -36,10 +36,4 @@ export function AuditPage() {
       </div>
     </div>
   );
-}
-
-function summarize(changes: Record<string, unknown> | null) {
-  if (!changes) return '';
-  const c = changes as { code?: string; name?: string; original_name?: string; format?: string };
-  return [c.code, c.name, c.original_name, c.format].filter(Boolean).join(' · ');
 }

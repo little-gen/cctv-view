@@ -7,7 +7,7 @@ import { HttpError, notFound } from '../../middleware/error.js';
 import { planUpload } from '../../middleware/upload.js';
 import { buildUpdate } from '../../lib/sql.js';
 import { idParam } from '../../lib/validation.js';
-import { extOf, storage } from '../../storage/storage.js';
+import { storage } from '../../storage/storage.js';
 import { audit, diff } from '../audit/audit.service.js';
 import { buildPlanTiles, ensurePlanTiles, inspectPlanImage, TILE_SIZE, tilesPrefix } from './planImage.js';
 
@@ -75,9 +75,9 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
   if (!file) throw new HttpError(400, 'Falta el fichero (campo "file")');
 
   // Dimensiones ya orientadas (EXIF) y validación de la imagen antes de guardar nada
-  await inspectPlanImage(file.buffer);
+  const { mime } = await inspectPlanImage(file.buffer);
   const version = plan.version + 1;
-  const key = await storage.save(file.buffer, { folder: 'plans', ext: extOf(file.originalname) || file.mimetype.split('/')[1] });
+  const key = await storage.save(file.buffer, { folder: 'plans', ext: mime.split('/')[1] });
 
   // Pirámide de teselas de la nueva versión (segundos para planos grandes, fuera del event loop)
   let dims: Awaited<ReturnType<typeof buildPlanTiles>>;
@@ -92,12 +92,12 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
     await db.query(
       `INSERT INTO floor_plan_images (floor_plan_id, version, storage_key, mime_type, width_px, height_px, original_name, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, version, key, file.mimetype, dims.original.width, dims.original.height, file.originalname, currentUser(req).id],
+      [id, version, key, mime, dims.original.width, dims.original.height, file.originalname, currentUser(req).id],
     );
     const { rows } = await db.query<FloorPlanRow>(
       `UPDATE floor_plans SET storage_key = $2, mime_type = $3, width_px = $4, height_px = $5, version = $6
        WHERE id = $1 RETURNING *`,
-      [id, key, file.mimetype, dims.width, dims.height, version],
+      [id, key, mime, dims.width, dims.height, version],
     );
     await audit(
       req,

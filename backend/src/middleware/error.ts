@@ -49,6 +49,18 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(400).json({ error: `Error en la subida: ${err.message}` });
     return;
   }
+  // Peticiones mal formadas (multipart roto, nombre de fichero con caracteres de control...)
+  const message = (err as Error)?.message ?? '';
+  if (/^(Malformed part header|Unexpected end of form|Multipart: Boundary not found|Malformed urlencoded form)/.test(message)) {
+    res.status(400).json({ error: 'Petición de subida mal formada' });
+    return;
+  }
+  // Errores 4xx de los parsers de Express (JSON mal formado, cuerpo demasiado grande...)
+  const status = (err as { status?: number; statusCode?: number }).status ?? (err as { statusCode?: number }).statusCode;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    res.status(status).json({ error: status === 413 ? 'Petición demasiado grande' : 'Petición no válida' });
+    return;
+  }
   const pgCode = (err as { code?: string }).code;
   if (pgCode && PG_ERRORS[pgCode]) {
     const [status, message] = PG_ERRORS[pgCode];

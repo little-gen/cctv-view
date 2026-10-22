@@ -10,6 +10,12 @@ export interface User {
   role: Role;
   active?: boolean;
   last_login_at?: string | null;
+  /** Sesión actual: la contraseña la fijó el administrador y hay que cambiarla */
+  mustChangePassword?: boolean;
+  /** Listado de administración */
+  must_change_password?: boolean;
+  locked_until?: string | null;
+  reset_pending?: boolean;
 }
 
 export interface Project {
@@ -132,7 +138,7 @@ export interface SearchResponse {
 export interface AuditEntry {
   id: number;
   occurred_at: string;
-  action: 'create' | 'update' | 'delete' | 'login' | 'export';
+  action: 'create' | 'update' | 'delete' | 'login' | 'login_failed' | 'logout' | 'password_change' | 'password_reset' | 'export';
   entity_type: string;
   entity_id: string | null;
   user_name: string | null;

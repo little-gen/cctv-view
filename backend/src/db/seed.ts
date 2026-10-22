@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import { hashPassword } from '../lib/password.js';
 import { config } from '../config.js';
 import { pool } from './pool.js';
 
@@ -24,7 +24,7 @@ const users = [
 
 async function seed() {
   for (const u of users) {
-    const hash = await bcrypt.hash(u.password, 10);
+    const hash = await hashPassword(u.password);
     const { rowCount } = await pool.query(
       `INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, $4)
        ON CONFLICT ((lower(email))) DO NOTHING`,

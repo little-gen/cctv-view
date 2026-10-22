@@ -7,9 +7,12 @@
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; . ./.env; set +a
-
-DATA_DIR=${DATA_DIR:-/data}
+# Lee variables de .env sin ejecutarlo como shell (valores como "0 3 * * *" romperían un "source")
+env_get() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d '"'"'"'\r'; }
+DOMAIN=$(env_get DOMAIN)
+LETSENCRYPT_EMAIL=$(env_get LETSENCRYPT_EMAIL)
+LETSENCRYPT_STAGING=$(env_get LETSENCRYPT_STAGING)
+DATA_DIR=$(env_get DATA_DIR); DATA_DIR=${DATA_DIR:-/data}
 LIVE="$DATA_DIR/letsencrypt/live/$DOMAIN"
 STAGING_ARG=""
 [ "${LETSENCRYPT_STAGING:-0}" = "1" ] && STAGING_ARG="--staging"

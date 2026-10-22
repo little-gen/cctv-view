@@ -193,6 +193,9 @@ nano .env
 | `LETSENCRYPT_EMAIL` | correo para los avisos de caducidad |
 | `LETSENCRYPT_STAGING` | `1` para una primera prueba sin agotar los límites de Let's Encrypt; después `0` |
 | `POSTGRES_PASSWORD`, `JWT_SECRET` | secretos generados (solo `[a-f0-9]`, porque van dentro de una URL) |
+| `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | rol **sin privilegios** con el que se conecta la aplicación; lo crea el backend al arrancar (`cctv_app` / `openssl rand -hex 32`). Vacío = usa el propietario (no recomendado) |
+| `API_DOCS` | `false`: Swagger y `/api/openapi.json` desactivados en producción |
+| `HEALTH_ALLOW` | IP o red que puede consultar `/api/health` a través de nginx (`127.0.0.1` por defecto) |
 | `PLAN_MAX_UPLOAD_MB` / `PLAN_MAX_MEGAPIXELS` / `PLAN_MAX_INPUT_MEGAPIXELS` | `200` / `400` / `2000`: tamaño máximo del fichero, resolución de visualización (los planos mayores se reducen para el zoom; el original se conserva) y resolución máxima aceptada. Si se sube el primero, ajustar `client_max_body_size` en la ubicación de subida de planos de `nginx/templates/cctv.conf.template` |
 | `BACKUP_SCHEDULE` / `BACKUP_RETENTION_DAYS` | `0 3 * * *` / `14` |
 | `DATA_DIR` | `/data` |

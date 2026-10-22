@@ -70,7 +70,13 @@ services:
       <<: *tz
       NODE_ENV: production
       PORT: 4000
+      # Propietario de la BD: solo para las migraciones si existe POSTGRES_APP_PASSWORD
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Rol sin privilegios con el que se conecta la aplicación (mínimo privilegio)
+      APP_DB_USER: ${POSTGRES_APP_USER:-cctv_app}
+      APP_DB_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
+      PUBLIC_URL: https://${DOMAIN}
+      API_DOCS: ${API_DOCS:-false}
       PG_POOL_MAX: 20
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
@@ -114,6 +120,8 @@ services:
     environment:
       <<: *tz
       DOMAIN: ${DOMAIN}
+      # Quién puede consultar /api/health a través de nginx (CIDR o IP)
+      HEALTH_ALLOW: ${HEALTH_ALLOW:-127.0.0.1}
     # Procesa las plantillas (envsubst) y recarga cada 6 h para tomar los certificados renovados
     entrypoint: ["/bin/sh", "-c"]
     command: ["(while :; do sleep 6h; nginx -s reload; done) & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]

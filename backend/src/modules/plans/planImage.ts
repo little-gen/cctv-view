@@ -58,13 +58,19 @@ function imageError(err: unknown): never {
 }
 
 /** Dimensiones ya orientadas según EXIF (como se verá en pantalla). */
-export async function inspectPlanImage(input: Buffer): Promise<{ width: number; height: number }> {
+const FORMAT_MIME: Record<string, string> = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', tiff: 'image/tiff' };
+
+export async function inspectPlanImage(input: Buffer): Promise<{ width: number; height: number; mime: string }> {
   try {
     const meta = await sharp(input, { limitInputPixels: config.planMaxInputPixels }).metadata();
     const { width, height } = meta.autoOrient ?? meta;
     if (!width || !height) throw new Error('sin dimensiones');
-    return { width, height };
+    // Tipo real del contenido (no el que declara el navegador)
+    const mime = FORMAT_MIME[meta.format ?? ''];
+    if (!mime) throw new HttpError(415, `Formato de plano no admitido: ${meta.format}`);
+    return { width, height, mime };
   } catch (err) {
+    if (err instanceof HttpError) throw err;
     imageError(err);
   }
 }
