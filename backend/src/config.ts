@@ -24,8 +24,10 @@ export const config = {
   maxUploadBytes: Number(process.env.MAX_UPLOAD_MB ?? 25) * 1024 * 1024,
   /** Los planos pueden ser mucho mayores que fotos y documentos (escaneos A0, PNG de alta resolución) */
   planMaxUploadBytes: Number(process.env.PLAN_MAX_UPLOAD_MB ?? 200) * 1024 * 1024,
-  /** Límite de descompresión de imágenes de plano (protege la memoria del servidor) */
+  /** Resolución de visualización: los planos mayores se reducen a esto para las teselas (el original se conserva) */
   planMaxPixels: Number(process.env.PLAN_MAX_MEGAPIXELS ?? 400) * 1_000_000,
+  /** Límite absoluto de lectura (protección frente a "bombas de descompresión"): se rechaza por encima */
+  planMaxInputPixels: Number(process.env.PLAN_MAX_INPUT_MEGAPIXELS ?? 2000) * 1_000_000,
 };
 
 function optionalPath(p: string | undefined) {

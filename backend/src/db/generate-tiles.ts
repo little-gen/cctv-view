@@ -14,12 +14,13 @@ async function main() {
   let failed = 0;
   for (const [i, plan] of rows.entries()) {
     const t0 = Date.now();
+    const size = `${plan.width_px} × ${plan.height_px} px (${Math.round(((plan.width_px ?? 0) * (plan.height_px ?? 0)) / 1e6)} Mpx)`;
     try {
       await ensurePlanTiles(plan); // no hace nada si ya existen
-      console.log(`  [${i + 1}/${rows.length}] ${plan.name} (v${plan.version}) · ${Date.now() - t0} ms`);
+      console.log(`  [${i + 1}/${rows.length}] ${plan.name} (v${plan.version}, ${size}) · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     } catch (err) {
       failed++;
-      console.error(`  [${i + 1}/${rows.length}] ${plan.name}: ${(err as Error).message}`);
+      console.error(`  [${i + 1}/${rows.length}] ${plan.name} (${size}): ${(err as Error).message}`);
     }
   }
   if (failed) process.exitCode = 1;

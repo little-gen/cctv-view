@@ -193,7 +193,7 @@ nano .env
 | `LETSENCRYPT_EMAIL` | correo para los avisos de caducidad |
 | `LETSENCRYPT_STAGING` | `1` para una primera prueba sin agotar los límites de Let's Encrypt; después `0` |
 | `POSTGRES_PASSWORD`, `JWT_SECRET` | secretos generados (solo `[a-f0-9]`, porque van dentro de una URL) |
-| `PLAN_MAX_UPLOAD_MB` / `PLAN_MAX_MEGAPIXELS` | `200` / `400`: tamaño y resolución máximos de un plano. Si se sube el primero, ajustar `client_max_body_size` en la ubicación de subida de planos de `nginx/templates/cctv.conf.template` |
+| `PLAN_MAX_UPLOAD_MB` / `PLAN_MAX_MEGAPIXELS` / `PLAN_MAX_INPUT_MEGAPIXELS` | `200` / `400` / `2000`: tamaño máximo del fichero, resolución de visualización (los planos mayores se reducen para el zoom; el original se conserva) y resolución máxima aceptada. Si se sube el primero, ajustar `client_max_body_size` en la ubicación de subida de planos de `nginx/templates/cctv.conf.template` |
 | `BACKUP_SCHEDULE` / `BACKUP_RETENTION_DAYS` | `0 3 * * *` / `14` |
 | `DATA_DIR` | `/data` |
 

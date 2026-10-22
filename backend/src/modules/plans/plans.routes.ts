@@ -80,7 +80,7 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
   const key = await storage.save(file.buffer, { folder: 'plans', ext: extOf(file.originalname) || file.mimetype.split('/')[1] });
 
   // Pirámide de teselas de la nueva versión (segundos para planos grandes, fuera del event loop)
-  let dims: { width: number; height: number };
+  let dims: Awaited<ReturnType<typeof buildPlanTiles>>;
   try {
     dims = await buildPlanTiles(id, version, file.buffer);
   } catch (err) {
@@ -92,7 +92,7 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
     await db.query(
       `INSERT INTO floor_plan_images (floor_plan_id, version, storage_key, mime_type, width_px, height_px, original_name, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, version, key, file.mimetype, dims.width, dims.height, file.originalname, currentUser(req).id],
+      [id, version, key, file.mimetype, dims.original.width, dims.original.height, file.originalname, currentUser(req).id],
     );
     const { rows } = await db.query<FloorPlanRow>(
       `UPDATE floor_plans SET storage_key = $2, mime_type = $3, width_px = $4, height_px = $5, version = $6
@@ -109,16 +109,22 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
   // Las teselas de la versión anterior ya no se usan (se pueden regenerar desde el histórico)
   if (plan.version > 0) await storage.removeTree(tilesPrefix(id, plan.version)).catch(() => undefined);
 
+  const warnings: string[] = [];
   // Aviso si cambia la proporción: las cámaras podrían quedar desplazadas
-  let warning: string | undefined;
   if (plan.width_px && plan.height_px) {
     const oldRatio = plan.width_px / plan.height_px;
     const newRatio = dims.width / dims.height;
     if (Math.abs(oldRatio - newRatio) / oldRatio > 0.02) {
-      warning = 'La proporción del nuevo plano difiere de la anterior; revisa la posición de las cámaras.';
+      warnings.push('La proporción del nuevo plano difiere de la anterior; revisa la posición de las cámaras.');
     }
   }
-  res.json({ ...updated, warning });
+  if (dims.downscaled) {
+    warnings.push(
+      `El plano (${dims.original.width} × ${dims.original.height} px) se muestra a ${dims.width} × ${dims.height} px, ` +
+        'más que suficiente para cualquier zoom. El original se conserva sin cambios.',
+    );
+  }
+  res.json({ ...updated, warning: warnings.join(' ') || undefined });
 });
 
 plansRouter.get('/plans/:id/image', async (req, res) => {
