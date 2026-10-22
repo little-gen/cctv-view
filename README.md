@@ -7,7 +7,7 @@ Aplicación web responsive para documentar cámaras de videovigilancia sobre pla
 - **Base de datos**: PostgreSQL 17
 - **API REST** documentada con OpenAPI 3.1 (Swagger UI en `/api/docs`)
 
-Documentación: [arquitectura](docs/arquitectura.md) · [modelo de datos](docs/modelo-datos.md) · [pantallas](docs/pantallas.md) · [búsqueda global](docs/busqueda-global.md) · **[despliegue en producción (Proxmox + Docker)](docs/despliegue-produccion.md)**
+Documentación: [arquitectura](docs/arquitectura.md) · [modelo de datos](docs/modelo-datos.md) · [pantallas](docs/pantallas.md) · [búsqueda global](docs/busqueda-global.md) · **[despliegue en producción (Proxmox + Docker)](docs/despliegue-produccion.md)** · **[instalación real en Teku Systems](docs/instalacion-tekusys.md)**
 
 ## Puesta en marcha
 

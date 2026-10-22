@@ -193,6 +193,7 @@ nano .env
 | `LETSENCRYPT_EMAIL` | correo para los avisos de caducidad |
 | `LETSENCRYPT_STAGING` | `1` para una primera prueba sin agotar los límites de Let's Encrypt; después `0` |
 | `POSTGRES_PASSWORD`, `JWT_SECRET` | secretos generados (solo `[a-f0-9]`, porque van dentro de una URL) |
+| `PLAN_MAX_UPLOAD_MB` / `PLAN_MAX_MEGAPIXELS` | `200` / `400`: tamaño y resolución máximos de un plano. Si se sube el primero, ajustar `client_max_body_size` en la ubicación de subida de planos de `nginx/templates/cctv.conf.template` |
 | `BACKUP_SCHEDULE` / `BACKUP_RETENTION_DAYS` | `0 3 * * *` / `14` |
 | `DATA_DIR` | `/data` |
 
@@ -270,6 +271,7 @@ Después abre https://cctv.midominio.com, inicia sesión y crea los usuarios té
 ```
 /data
 ├── plans/         imágenes de planos (versiones incluidas)    1000:1000  → backend:/data/plans
+│   └── tiles/     niveles de zoom (teselas WebP; regenerables, no se copian en los backups)
 ├── uploads/       fotografías de cámaras                      1000:1000  → backend:/data/uploads
 ├── documents/     documentación (PDF, Office…)                1000:1000  → backend:/data/documents
 ├── postgres/      datos de PostgreSQL (volumen Docker "pgdata")
@@ -406,6 +408,7 @@ docker system df                               # espacio usado por Docker
 | 502 Bad Gateway | El backend no está sano: `docker compose logs backend` (¿`JWT_SECRET` corto? ¿la BD no arranca?). |
 | `Error: JWT_SECRET debe configurarse` | `JWT_SECRET` vacío o con menos de 32 caracteres en `.env`. |
 | No se pueden subir ficheros (500) | Permisos: `sudo chown -R 1000:1000 /data/{plans,uploads,documents}`. |
-| 413 Request Entity Too Large | Sube `client_max_body_size` (nginx.conf) y `MAX_UPLOAD_MB` (.env). |
+| 413 Request Entity Too Large | Planos: `PLAN_MAX_UPLOAD_MB` (.env) y `client_max_body_size` de la ubicación `/api/plans/…/image` (cctv.conf.template). Fotos/documentos: `MAX_UPLOAD_MB` y `client_max_body_size` de nginx.conf. |
+| Un plano tarda en aparecer la primera vez | Planos subidos antes de la versión con teselas: se procesan al abrirlos (unos segundos). Para hacerlo de antemano: `docker compose exec backend node dist/db/generate-tiles.js`. |
 | Ampliar `/data` | En Proxmox: `qm disk resize 120 scsi1 +100G`. En la VM: `sudo resize2fs /dev/sdb` (en caliente). |
 | La actualización hizo rollback | `journalctl -u cctv-update -n 200` y `docker compose logs backend` de la versión fallida. |

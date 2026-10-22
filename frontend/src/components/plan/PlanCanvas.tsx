@@ -1,14 +1,16 @@
 import Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { Maximize2, Minus, Plus } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react';
 import { Image as KImage, Layer, Stage } from 'react-konva';
-import { useAuthedObjectUrl } from '@/api/hooks';
+import { usePlanPreview, usePlanTiles } from '@/api/hooks';
 import { renderCoverage, type CoverageGrid } from '@/lib/coverage';
-import { useElementSize, useHtmlImage } from '@/lib/hooks';
+import { useDebouncedValue, useElementSize } from '@/lib/hooks';
+import { chooseLevel, tileStore, visibleTiles, type TileRef } from '@/lib/tiles';
 import { useEditor } from '@/store/editorStore';
 import type { Camera, CameraInput, CameraType, FloorPlan } from '@/types';
-import { CameraMarker, CoverageCone } from './CameraMarker';
+import { CameraMarker } from './CameraMarker';
+import { CoverageCones } from './CoverageCones';
 import { ScaleBar } from './ScaleBar';
 
 Konva.hitOnDragEnabled = true; // necesario para el pellizco (pinch-zoom) en táctil
@@ -25,27 +27,50 @@ interface Props {
 }
 
 type Draft = Partial<Pick<Camera, 'pos_x' | 'pos_y' | 'rotation_deg'>>;
+type View = { scale: number; x: number; y: number };
 
-const MIN_SCALE = 0.05;
+const MIN_SCALE = 0.02;
 const MAX_SCALE = 8;
 
 export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpdate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const size = useElementSize(containerRef);
-  const imageUrl = useAuthedObjectUrl(plan.storage_key ? `/plans/${plan.id}/image?v=${plan.version}` : null);
-  const image = useHtmlImage(imageUrl);
+
+  // Plano por teselas: vista previa (≤2048 px) al instante + teselas visibles al nivel del zoom.
+  // Nunca se carga ni se dibuja la imagen original completa.
+  const tiles = usePlanTiles(plan.id, plan.version, !!plan.storage_key);
+  const info = tiles.data;
+  const preview = usePlanPreview(plan.id, info?.version);
 
   const { selectedId, select, focus, clearFocus, placingType, setPlacingType, showCones, showLabels, coverageMode } = useEditor();
-  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
   // Estado transitorio mientras se arrastra/rota (se confirma al soltar)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
-  const imgW = plan.width_px ?? image?.width ?? 1;
-  const imgH = plan.height_px ?? image?.height ?? 1;
+  const imgW = info?.width ?? plan.width_px ?? 1;
+  const imgH = info?.height ?? plan.height_px ?? 1;
   const pxPerM = imgW / plan.width_m;
 
   // ----------------------------------------------------------- vista
+  // Rueda, pellizco y arrastre generan decenas de eventos por segundo: se acumulan y se
+  // aplican una sola vez por fotograma (requestAnimationFrame), no un render por evento.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const pendingView = useRef<View | null>(null);
+  const rafId = useRef(0);
+  const scheduleView = useCallback((update: (v: View) => View) => {
+    pendingView.current = update(pendingView.current ?? viewRef.current);
+    if (rafId.current) return;
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = 0;
+      const next = pendingView.current;
+      pendingView.current = null;
+      if (next) setView(next);
+    });
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(rafId.current), []);
+
   const fit = useCallback(() => {
     if (!size.width || !size.height) return;
     const scale = Math.min(size.width / imgW, size.height / imgH) * 0.95;
@@ -62,14 +87,16 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
     }
   }, [plan.id, plan.version, size.width, fit]);
 
-  const zoomAt = useCallback((point: { x: number; y: number }, factor: number) => {
-    setView((v) => {
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
-      const mx = (point.x - v.x) / v.scale;
-      const my = (point.y - v.y) / v.scale;
-      return { scale, x: point.x - mx * scale, y: point.y - my * scale };
-    });
-  }, []);
+  const zoomAt = useCallback(
+    (point: { x: number; y: number }, factor: number) =>
+      scheduleView((v) => {
+        const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
+        const mx = (point.x - v.x) / v.scale;
+        const my = (point.y - v.y) / v.scale;
+        return { scale, x: point.x - mx * scale, y: point.y - my * scale };
+      }),
+    [scheduleView],
+  );
 
   const zoomCenter = (factor: number) => zoomAt({ x: size.width / 2, y: size.height / 2 }, factor);
 
@@ -99,7 +126,10 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
   const onWheel = (e: KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const pointer = stageRef.current?.getPointerPosition();
-    if (pointer) zoomAt(pointer, e.evt.deltaY > 0 ? 1 / 1.15 : 1.15);
+    if (!pointer) return;
+    // Zoom proporcional al desplazamiento: suave con touchpad, ~15 % por "clic" de rueda
+    const delta = e.evt.deltaMode === 1 ? e.evt.deltaY * 40 : e.evt.deltaY;
+    zoomAt(pointer, Math.exp(-Math.max(-300, Math.min(300, delta)) * 0.0014));
   };
 
   // Pellizco en táctil
@@ -118,12 +148,17 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
     const last = pinch.current;
     pinch.current = { dist, center };
     if (!last) return;
-    setView((v) => {
+    scheduleView((v) => {
       const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, (v.scale * dist) / last.dist));
       const mx = (last.center.x - v.x) / v.scale;
       const my = (last.center.y - v.y) / v.scale;
       return { scale, x: center.x - mx * scale, y: center.y - my * scale };
     });
+  };
+
+  const onStageDrag = (e: KonvaEventObject<globalThis.DragEvent>) => {
+    const stage = e.target;
+    if (stage === stage.getStage()) scheduleView((v) => ({ ...v, x: stage.x(), y: stage.y() }));
   };
 
   // ------------------------------------------------- crear cámaras
@@ -151,19 +186,26 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
       setPlacingType(null);
       return;
     }
-    // Clic en zona vacía: deseleccionar
-    if (e.target === stage || e.target.name() === 'plan-image') select(null);
+    // Clic en zona vacía (el plano no recibe eventos): deseleccionar
+    if (e.target === stage) select(null);
   };
 
   // ------------------------------------------- arrastre/rotación
+  // Callbacks estables: con React.memo, mover el plano no re-renderiza cada cámara
   const committed = useRef(new Set<string>());
-  const patchDraft = (id: string, d: Draft, final: boolean) => {
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+  const patchDraft = useCallback((id: string, d: Draft, final: boolean) => {
     setDrafts((s) => ({ ...s, [id]: { ...s[id], ...d } }));
     if (final) {
       committed.current.add(id);
-      onUpdate(id, d);
+      onUpdateRef.current(id, d);
     }
-  };
+  }, []);
+  const onMarkerRotate = useCallback(
+    (id: string, deg: number, final: boolean) => patchDraft(id, { rotation_deg: deg }, final),
+    [patchDraft],
+  );
   // El borrador se descarta cuando la caché (actualización optimista) ya refleja el cambio,
   // así el marcador no "salta" a la posición anterior durante un fotograma.
   useEffect(() => {
@@ -178,6 +220,36 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
 
   const shown = useMemo(() => cameras.map((c) => (drafts[c.id] ? { ...c, ...drafts[c.id] } : c)), [cameras, drafts]);
   const selected = shown.find((c) => c.id === selectedId);
+
+  // ------------------------------------------------- teselas visibles
+  // Nivel y área se calculan con la vista "asentada" (120 ms sin cambios) para no descargar
+  // niveles intermedios durante el zoom; mientras tanto se pinta lo que ya está cargado.
+  useSyncExternalStore(tileStore.subscribe, tileStore.getVersion);
+  const settled = useDebouncedValue(view, 120);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const { wanted, fallback } = useMemo(() => {
+    const none = { wanted: [] as TileRef[], fallback: [] as TileRef[] };
+    if (!info || !size.width) return none;
+    const level = chooseLevel(info, settled.scale, dpr);
+    if (level === null) return none; // basta con la vista previa
+    const margin = 256 / settled.scale; // precarga un borde alrededor de la vista
+    const rect = {
+      x0: -settled.x / settled.scale - margin,
+      y0: -settled.y / settled.scale - margin,
+      x1: (size.width - settled.x) / settled.scale + margin,
+      y1: (size.height - settled.y) / settled.scale + margin,
+    };
+    return {
+      wanted: visibleTiles(plan.id, info, level, rect),
+      // Nivel anterior, si ya está en caché: evita ver la vista previa borrosa al acercar
+      fallback: level > 0 ? visibleTiles(plan.id, info, level - 1, rect) : [],
+    };
+  }, [info, plan.id, settled, size.width, size.height, dpr]);
+  useEffect(() => tileStore.request(wanted), [wanted]);
+  const tilePad = 0.75 / view.scale; // solapa ~1 px de pantalla: sin líneas entre teselas
+  const drawTiles = [...fallback, ...wanted]
+    .map((t) => ({ t, bmp: tileStore.get(t.key) }))
+    .filter((d): d is { t: TileRef; bmp: ImageBitmap } => !!d.bmp);
 
   const coverageCanvas = useMemo(
     () => (coverage && coverageMode !== 'none' ? renderCoverage(coverage, coverageMode) : null),
@@ -204,26 +276,25 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
           onWheel={onWheel}
           onTouchMove={onTouchMove}
           onTouchEnd={() => (pinch.current = null)}
-          onDragEnd={(e) => e.target === e.target.getStage() && setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }))}
+          onDragMove={onStageDrag}
+          onDragEnd={onStageDrag}
           onClick={onStageClick}
           onTap={onStageClick}
         >
-          <Layer>
-            {image && <KImage image={image} width={imgW} height={imgH} name="plan-image" />}
+          {/* Plano: sin eventos ni hit-graph, no tiene coste al mover el ratón */}
+          <Layer listening={false}>
+            {preview && <KImage image={preview} width={imgW} height={imgH} />}
+            {drawTiles.map(({ t, bmp }) => (
+              <KImage key={t.key} image={bmp} x={t.x} y={t.y} width={t.w + tilePad} height={t.h + tilePad} />
+            ))}
             {coverageCanvas && coverage && (
-              <KImage
-                image={coverageCanvas}
-                width={coverage.cols * coverage.cellPx}
-                height={coverage.rows * coverage.cellPx}
-                listening={false}
-              />
+              <KImage image={coverageCanvas} width={coverage.cols * coverage.cellPx} height={coverage.rows * coverage.cellPx} />
             )}
           </Layer>
           <Layer listening={false}>
-            {showCones &&
-              shown.map((c) => (
-                <CoverageCone key={c.id} camera={c} imgW={imgW} imgH={imgH} pxPerM={pxPerM} scale={view.scale} selected={c.id === selectedId} />
-              ))}
+            {showCones && (
+              <CoverageCones cameras={shown} selectedId={selectedId} imgW={imgW} imgH={imgH} pxPerM={pxPerM} view={view} viewport={size} />
+            )}
           </Layer>
           <Layer>
             {shown
@@ -241,16 +312,30 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
                   highlightKey={highlight?.id === c.id ? highlight.nonce : undefined}
                   editable={editable}
                   showLabel={showLabels}
-                  onSelect={() => select(c.id)}
-                  onMove={(pos, final) => patchDraft(c.id, pos, final)}
-                  onRotate={(deg, final) => patchDraft(c.id, { rotation_deg: deg }, final)}
+                  onSelect={select}
+                  onMove={patchDraft}
+                  onRotate={onMarkerRotate}
                 />
               ))}
           </Layer>
         </Stage>
       )}
 
-      {!image && plan.storage_key && <div className="absolute inset-0 grid place-items-center text-muted">Cargando plano…</div>}
+      {plan.storage_key && !preview && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center p-4 text-center text-muted">
+          {tiles.isError ? (
+            <span className="text-red-300">No se pudo cargar el plano: {(tiles.error as Error).message}</span>
+          ) : tiles.isFetching ? (
+            <span>
+              Preparando el plano…
+              <br />
+              <span className="text-xs">Los planos grandes se procesan una sola vez para que el zoom sea fluido.</span>
+            </span>
+          ) : (
+            'Cargando plano…'
+          )}
+        </div>
+      )}
 
       {placingType && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-accent-strong px-3 py-1 text-sm text-white shadow-lg">

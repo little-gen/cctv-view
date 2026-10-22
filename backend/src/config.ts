@@ -22,6 +22,10 @@ export const config = {
     documents: optionalPath(process.env.DOCUMENTS_DIR),
   },
   maxUploadBytes: Number(process.env.MAX_UPLOAD_MB ?? 25) * 1024 * 1024,
+  /** Los planos pueden ser mucho mayores que fotos y documentos (escaneos A0, PNG de alta resolución) */
+  planMaxUploadBytes: Number(process.env.PLAN_MAX_UPLOAD_MB ?? 200) * 1024 * 1024,
+  /** Límite de descompresión de imágenes de plano (protege la memoria del servidor) */
+  planMaxPixels: Number(process.env.PLAN_MAX_MEGAPIXELS ?? 400) * 1_000_000,
 };
 
 function optionalPath(p: string | undefined) {

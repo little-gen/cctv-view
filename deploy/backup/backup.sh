@@ -62,8 +62,9 @@ if [ "${BACKUP_FILES:-true}" = "true" ]; then
   LINK=""
   [ -n "$LAST" ] && LINK="--link-dest=$LAST"
   log "Instantánea de ficheros${LAST:+ (incremental sobre $(basename "$LAST"))}…"
+  # Las teselas de zoom (plans/tiles) no se copian: se regeneran desde el original
   # shellcheck disable=SC2086
-  rsync -a $LINK /data/plans /data/uploads /data/documents "$FILES_DIR/$TS.partial/"
+  rsync -a $LINK --exclude=/plans/tiles/ /data/plans /data/uploads /data/documents "$FILES_DIR/$TS.partial/"
   mv "$FILES_DIR/$TS.partial" "$FILES_DIR/$TS"
   log "Ficheros: $(du -sh "$FILES_DIR/$TS" | cut -f1) (lo nuevo respecto a la anterior)"
 fi

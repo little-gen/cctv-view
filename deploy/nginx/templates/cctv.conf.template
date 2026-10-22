@@ -65,6 +65,26 @@ server {
         proxy_pass http://cctv_backend;
     }
 
+    # Subida de planos: ficheros grandes (escaneos, PNG de alta resolución) y unos segundos
+    # de proceso en el servidor para generar los niveles de zoom
+    location ~ ^/api/plans/[^/]+/image$ {
+        client_max_body_size 210m;
+        client_body_timeout 300s;
+        limit_req zone=api burst=60 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_pass http://cctv_backend;
+    }
+
+    # Teselas y vista previa del plano: límite propio y amplio (no deben provocar 429
+    # ni bloqueos de fail2ban al hacer zoom)
+    location ~ ^/api/plans/[^/]+/(tiles|preview)/ {
+        limit_req zone=tiles burst=300 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://cctv_backend;
+    }
+
     # API REST (la búsqueda global hace varias peticiones por segundo mientras se escribe)
     location /api/ {
         limit_req zone=api burst=60 nodelay;

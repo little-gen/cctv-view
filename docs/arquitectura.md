@@ -39,10 +39,11 @@
 | **Coordenadas normalizadas (0..1)** respecto a la imagen | Sustituir el plano (nueva revisión, otra resolución) conserva la configuración. Si cambia la proporción, la API devuelve un `warning`. |
 | **Escala por plano (`width_m`)** | Los alcances se guardan en metros (dato técnico real) y se convierten a píxeles al dibujar. |
 | **Ángulos**: 0° = derecha, sentido horario | Coincide con el sistema de canvas/Konva/PDFKit (eje Y hacia abajo): no hay conversiones. |
-| **Konva (canvas)** en vez de SVG/DOM | Rinde con cientos de cámaras y planos de 16 Mpx; arrastre y gestos táctiles nativos. |
+| **Konva (canvas)** en vez de SVG/DOM | Rinde con cientos de cámaras; arrastre y gestos táctiles nativos. Zoom/desplazamiento agrupados en un render por fotograma y marcadores memorizados. |
+| **Plano por teselas** (Deep Zoom, `sharp`/libvips) | Al subir un plano se genera una pirámide de teselas WebP de 512 px y una vista previa de 2048 px. El navegador solo descarga y dibuja las teselas visibles al nivel del zoom, descodificadas con `createImageBitmap` (fuera del hilo principal) en una caché LRU acotada. Dibujar la imagen original completa (decenas de Mpx) bloqueaba el navegador varios segundos. Los planos antiguos se procesan la primera vez que se abren (o con `generate-tiles`). |
 | **Iconos de tamaño constante** | Los marcadores se escalan con `1/zoom`: legibles con cualquier nivel de zoom. |
 | **Tipo = forma + etiqueta + color** | Con 5 colores repartidos por el plano no hay paleta distinguible para todos los pares (validado, también con daltonismo); la forma y la etiqueta garantizan la identificación. Estado = color del borde, siempre con texto en la ficha y la lista. |
-| **PDF → imagen en el cliente** (pdf.js) | El servidor solo recibe PNG/JPEG: sin dependencias nativas (Ghostscript, poppler). |
+| **PDF → imagen en el cliente** (pdf.js) | El servidor solo recibe imágenes (PNG/JPEG/TIFF/WebP): sin Ghostscript ni poppler. Se rasteriza a la mayor resolución que admita el navegador (64 → 32 → 16 Mpx). |
 | **Ficheros vía `fetch` + `blob:`** | Las imágenes y adjuntos requieren JWT; no se exponen URLs públicas ni tokens en la query string. |
 | **Actualización optimista** (React Query) | Mover/rotar una cámara se refleja al instante; si el servidor falla, se revierte. |
 | **Cobertura calculada en el cliente** | Interactiva (se recalcula al mover cámaras). Modelo 2D sin obstáculos; ver «Evolución». |

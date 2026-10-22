@@ -2,7 +2,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect, useState } from 'react';
 import { countFilters, type GlobalSearchFilters } from '@/store/searchStore';
 import type { Attachment, AuditEntry, Camera, CameraInput, FloorPlan, Nvr, Project, ProjectDetail, SearchResponse, User } from '@/types';
-import { api, fetchBlob } from './client';
+import type { TileInfo } from '@/lib/tiles';
+import { api, fetchBlob, uploadWithProgress } from './client';
 
 export const qk = {
   projects: ['projects'] as const,
@@ -53,13 +54,50 @@ export function useUpdatePlan(projectId: string) {
 export function useUploadPlanImage(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ planId, file }: { planId: string; file: File }) => {
+    mutationFn: ({ planId, file, onProgress }: { planId: string; file: File; onProgress?: (fraction: number) => void }) => {
       const form = new FormData();
       form.append('file', file);
-      return api<FloorPlan & { warning?: string }>(`/plans/${planId}/image`, { method: 'PUT', form });
+      return uploadWithProgress<FloorPlan & { warning?: string }>('PUT', `/plans/${planId}/image`, form, onProgress);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.project(projectId) }),
   });
+}
+
+/**
+ * Metadatos de la pirámide de teselas. La primera vez que se abre un plano subido antes
+ * de existir las teselas, el servidor las genera (puede tardar unos segundos).
+ */
+export const usePlanTiles = (planId: string, version: number, enabled: boolean) =>
+  useQuery({
+    queryKey: ['plan-tiles', planId, version],
+    queryFn: () => api<TileInfo>(`/plans/${planId}/tiles-info`),
+    enabled,
+    staleTime: Infinity,
+    retry: 2,
+  });
+
+/** Vista previa del plano (≤2048 px) descodificada fuera del hilo principal. */
+export function usePlanPreview(planId: string, version: number | undefined) {
+  const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
+  useEffect(() => {
+    if (!version) return;
+    let cancelled = false;
+    let bmp: ImageBitmap | null = null;
+    fetchBlob(`/plans/${planId}/preview/${version}`)
+      .then((blob) => createImageBitmap(blob))
+      .then((b) => {
+        bmp = b;
+        if (cancelled) b.close();
+        else setBitmap(b);
+      })
+      .catch(() => !cancelled && setBitmap(null));
+    return () => {
+      cancelled = true;
+      bmp?.close();
+      setBitmap(null);
+    };
+  }, [planId, version]);
+  return bitmap;
 }
 
 // --------------------------------------------------------------- Cámaras

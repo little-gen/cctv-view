@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { imageSize } from 'image-size';
 import { z } from 'zod';
 import { pool, withTransaction, type Queryable } from '../../db/pool.js';
 import { EDITOR_ROLES, type FloorPlanRow } from '../../domain.js';
@@ -10,6 +9,7 @@ import { buildUpdate } from '../../lib/sql.js';
 import { idParam } from '../../lib/validation.js';
 import { extOf, storage } from '../../storage/storage.js';
 import { audit, diff } from '../audit/audit.service.js';
+import { buildPlanTiles, ensurePlanTiles, inspectPlanImage, TILE_SIZE, tilesPrefix } from './planImage.js';
 
 export const plansRouter = Router();
 
@@ -59,6 +59,7 @@ plansRouter.delete('/plans/:id', requireRole('admin'), async (req, res) => {
   const { id } = idParam.parse(req.params);
   const plan = await getPlan(id);
   await pool.query('DELETE FROM floor_plans WHERE id = $1', [id]);
+  await storage.removeTree(`plans/tiles/${id}`).catch(() => undefined);
   await audit(req, { action: 'delete', entityType: 'floor_plan', entityId: id, projectId: plan.project_id, changes: plan });
   res.status(204).end();
 });
@@ -73,11 +74,19 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
   const file = req.file;
   if (!file) throw new HttpError(400, 'Falta el fichero (campo "file")');
 
-  const dims = imageSize(file.buffer);
-  if (!dims.width || !dims.height) throw new HttpError(400, 'No se pudo leer la imagen');
-
-  const key = await storage.save(file.buffer, { folder: 'plans', ext: extOf(file.originalname) || file.mimetype.split('/')[1] });
+  // Dimensiones ya orientadas (EXIF) y validación de la imagen antes de guardar nada
+  await inspectPlanImage(file.buffer);
   const version = plan.version + 1;
+  const key = await storage.save(file.buffer, { folder: 'plans', ext: extOf(file.originalname) || file.mimetype.split('/')[1] });
+
+  // Pirámide de teselas de la nueva versión (segundos para planos grandes, fuera del event loop)
+  let dims: { width: number; height: number };
+  try {
+    dims = await buildPlanTiles(id, version, file.buffer);
+  } catch (err) {
+    await storage.remove(key);
+    throw err;
+  }
 
   const updated = await withTransaction(async (db) => {
     await db.query(
@@ -97,6 +106,8 @@ plansRouter.put('/plans/:id/image', requireRole(...EDITOR_ROLES), planUpload.sin
     );
     return rows[0];
   });
+  // Las teselas de la versión anterior ya no se usan (se pueden regenerar desde el histórico)
+  if (plan.version > 0) await storage.removeTree(tilesPrefix(id, plan.version)).catch(() => undefined);
 
   // Aviso si cambia la proporción: las cámaras podrían quedar desplazadas
   let warning: string | undefined;
@@ -117,6 +128,57 @@ plansRouter.get('/plans/:id/image', async (req, res) => {
   res.setHeader('Content-Type', plan.mime_type ?? 'application/octet-stream');
   res.setHeader('Cache-Control', 'private, max-age=3600');
   storage.stream(plan.storage_key).on('error', () => res.destroy()).pipe(res);
+});
+
+const tileParams = z.object({
+  id: z.string().uuid(),
+  version: z.coerce.number().int().min(1),
+  level: z.coerce.number().int().min(0).max(30),
+  tile: z.string().regex(/^\d{1,5}_\d{1,5}\.webp$/),
+});
+
+/** Sirve un fichero de teselas; si falta y es la versión vigente, genera la pirámide (planos antiguos). */
+async function sendTileFile(res: import('express').Response, planId: string, version: number, rel: string) {
+  const key = `${tilesPrefix(planId, version)}/${rel}`;
+  if (!(await storage.exists(key))) {
+    const plan = await getPlan(planId);
+    if (plan.version !== version) throw notFound('Versión del plano');
+    await ensurePlanTiles(plan);
+    if (!(await storage.exists(key))) throw notFound('Tesela');
+  }
+  res.setHeader('Content-Type', 'image/webp');
+  // La URL incluye la versión: el contenido nunca cambia
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  storage.stream(key).on('error', () => res.destroy()).pipe(res);
+}
+
+// GET /api/plans/:id/tiles/:version/:level/:col_:row.webp
+plansRouter.get('/plans/:id/tiles/:version/:level/:tile', async (req, res) => {
+  const p = tileParams.parse(req.params);
+  await sendTileFile(res, p.id, p.version, `plan_files/${p.level}/${p.tile}`);
+});
+
+// GET /api/plans/:id/preview/:version  (≤2048 px)
+plansRouter.get('/plans/:id/preview/:version', async (req, res) => {
+  const p = tileParams.pick({ id: true, version: true }).parse(req.params);
+  await sendTileFile(res, p.id, p.version, 'preview.webp');
+});
+
+/** Metadatos del visor: el cliente calcula los niveles a partir de ancho/alto. */
+plansRouter.get('/plans/:id/tiles-info', async (req, res) => {
+  const { id } = idParam.parse(req.params);
+  const plan = await getPlan(id);
+  if (!plan.storage_key || !plan.width_px || !plan.height_px) throw notFound('Imagen del plano');
+  await ensurePlanTiles(plan);
+  const fresh = await getPlan(id); // las dimensiones pueden haberse corregido al generar
+  res.json({
+    version: fresh.version,
+    width: fresh.width_px,
+    height: fresh.height_px,
+    tileSize: TILE_SIZE,
+    maxLevel: Math.ceil(Math.log2(Math.max(fresh.width_px!, fresh.height_px!))),
+    format: 'webp',
+  });
 });
 
 plansRouter.get('/plans/:id/images', async (req, res) => {

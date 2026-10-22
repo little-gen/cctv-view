@@ -14,6 +14,13 @@ export interface StorageDriver {
   read(key: string): Promise<Buffer>;
   stream(key: string): Readable;
   remove(key: string): Promise<void>;
+  exists(key: string): Promise<boolean>;
+  /**
+   * Escribe un árbol de ficheros (p. ej. teselas) de forma atómica: `writer` recibe un
+   * directorio local temporal y, si termina bien, su contenido pasa a `prefix`.
+   */
+  writeTree<T>(prefix: string, writer: (dir: string) => Promise<T>): Promise<T>;
+  removeTree(prefix: string): Promise<void>;
 }
 
 /**
@@ -58,6 +65,35 @@ class LocalStorage implements StorageDriver {
 
   async remove(key: string) {
     await fsp.rm(this.resolve(key), { force: true });
+  }
+
+  async exists(key: string) {
+    try {
+      await fsp.access(this.resolve(key));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async writeTree<T>(prefix: string, writer: (dir: string) => Promise<T>): Promise<T> {
+    const final = this.resolve(prefix);
+    // Temporal junto al destino (mismo disco): el rename final es atómico y no usa RAM (/tmp es tmpfs)
+    const tmp = `${final}.tmp-${randomUUID().slice(0, 8)}`;
+    await fsp.mkdir(tmp, { recursive: true });
+    try {
+      const result = await writer(tmp);
+      await fsp.rm(final, { recursive: true, force: true });
+      await fsp.rename(tmp, final);
+      return result;
+    } catch (err) {
+      await fsp.rm(tmp, { recursive: true, force: true });
+      throw err;
+    }
+  }
+
+  async removeTree(prefix: string) {
+    await fsp.rm(this.resolve(prefix), { recursive: true, force: true });
   }
 }
 

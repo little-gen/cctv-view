@@ -23,17 +23,3 @@ export function useDebouncedValue<T>(value: T, ms: number): T {
   }, [value, ms]);
   return debounced;
 }
-
-export function useHtmlImage(url: string | null) {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  useEffect(() => {
-    if (!url) return setImage(null);
-    const img = new Image();
-    img.onload = () => setImage(img);
-    img.src = url;
-    return () => {
-      img.onload = null;
-    };
-  }, [url]);
-  return image;
-}

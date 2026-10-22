@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import multer from 'multer';
 import { ZodError } from 'zod';
+import { config } from '../config.js';
 
 export class HttpError extends Error {
   constructor(
@@ -39,6 +40,12 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
   if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      const isPlan = /\/plans\/[^/]+\/image$/.test(_req.path);
+      const mb = Math.round((isPlan ? config.planMaxUploadBytes : config.maxUploadBytes) / 1024 / 1024);
+      res.status(413).json({ error: `El fichero supera el tamaño máximo permitido (${mb} MB)` });
+      return;
+    }
     res.status(400).json({ error: `Error en la subida: ${err.message}` });
     return;
   }

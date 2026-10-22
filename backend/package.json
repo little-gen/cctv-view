@@ -15,7 +15,8 @@
     "migrate:prod": "node dist/db/migrate.js",
     "seed:prod": "node dist/db/seed.js",
     "smoke": "node scripts/smoke.mjs",
-    "search-check": "node scripts/search-check.mjs"
+    "search-check": "node scripts/search-check.mjs",
+    "plans:tiles": "tsx src/db/generate-tiles.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -24,12 +25,12 @@
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
-    "image-size": "^2.0.2",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "pdfkit": "^0.17.1",
     "pg": "^8.16.0",
+    "sharp": "^0.35.5",
     "swagger-ui-express": "^5.0.1",
     "yaml": "^2.8.0",
     "zod": "^3.25.0"

@@ -5,7 +5,7 @@ import { pool } from '../../db/pool.js';
 import { CAMERA_STATUS_LABELS, CAMERA_TYPE_LABELS, CAMERA_TYPES, type CameraRow } from '../../domain.js';
 import { notFound } from '../../middleware/error.js';
 import { idParam } from '../../lib/validation.js';
-import { storage } from '../../storage/storage.js';
+import { planPrintImage } from '../plans/planImage.js';
 import { audit } from '../audit/audit.service.js';
 import { listCameras } from '../cameras/cameras.repository.js';
 import { getPlan } from '../plans/plans.routes.js';
@@ -37,7 +37,8 @@ exportsRouter.get('/plans/:id/export/pdf', async (req, res) => {
   if (!plan.storage_key || !plan.width_px || !plan.height_px) throw notFound('Imagen del plano');
   const project = await getProject(plan.project_id);
   const cameras = await listCameras(plan.project_id, { floorPlanId: id });
-  const image = await storage.read(plan.storage_key);
+  // Versión reducida (≤5000 px, JPEG): no se descodifica el original en el event loop
+  const image = await planPrintImage(plan);
 
   const doc = new PDFDocument({ size: 'A3', layout: 'landscape', margin: 30, info: { Title: `${project.name} - ${plan.name}` } });
   sendFile(res, 'application/pdf', `plano_${slug(project.name)}_${slug(plan.name)}.pdf`);

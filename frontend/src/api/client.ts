@@ -42,9 +42,49 @@ async function request(path: string, { method = 'GET', body, form, signal }: Req
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, data.error ?? `Error ${res.status}`, data.details);
+    throw new ApiError(res.status, data.error ?? statusMessage(res.status), data.details);
   }
   return res;
+}
+
+// Errores sin cuerpo JSON (p. ej. los genera nginx antes de llegar a la API)
+const statusMessage = (status: number) =>
+  status === 413 ? 'El fichero supera el tamaño máximo que acepta el servidor' : status === 0 ? 'Error de red' : `Error ${status}`;
+
+/**
+ * Subida con progreso (fetch no informa del progreso de envío). `onProgress` recibe 0..1;
+ * al llegar a 1 el servidor aún puede estar procesando (p. ej. generando las teselas del plano).
+ */
+export function uploadWithProgress<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  form: FormData,
+  onProgress?: (fraction: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, `/api${path}`);
+    const token = tokenStore.get();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    xhr.upload.onload = () => onProgress?.(1);
+    xhr.onload = () => {
+      let data: { error?: string; details?: unknown } | undefined;
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : undefined;
+      } catch {
+        data = undefined;
+      }
+      if (xhr.status === 401 && token) {
+        tokenStore.clear();
+        window.dispatchEvent(new Event('auth:logout'));
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+      else reject(new ApiError(xhr.status, data?.error ?? statusMessage(xhr.status), data?.details));
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Error de red durante la subida'));
+    xhr.send(form);
+  });
 }
 
 export async function api<T>(path: string, opts?: RequestOptions): Promise<T> {

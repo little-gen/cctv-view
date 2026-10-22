@@ -1,36 +1,11 @@
 import Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
-import { useEffect, useRef } from 'react';
-import { Circle, Group, Label, Line, Rect, RegularPolygon, Tag, Text, Wedge } from 'react-konva';
+import { memo, useEffect, useRef } from 'react';
+import { Circle, Group, Label, Line, Rect, RegularPolygon, Tag, Text } from 'react-konva';
 import { CAMERA_STATUS, CAMERA_TYPES } from '@/lib/cameraTypes';
 import type { Camera } from '@/types';
 
 const HANDLE_DIST = 38; // px de pantalla
-
-/** Sector de cobertura en coordenadas de imagen. 0° = derecha, sentido horario. */
-export function CoverageCone({ camera, imgW, imgH, pxPerM, scale, selected }: {
-  camera: Camera;
-  imgW: number;
-  imgH: number;
-  pxPerM: number;
-  scale: number;
-  selected: boolean;
-}) {
-  const color = CAMERA_TYPES[camera.type].color;
-  const common = {
-    x: camera.pos_x * imgW,
-    y: camera.pos_y * imgH,
-    radius: camera.range_m * pxPerM,
-    fill: color,
-    opacity: selected ? 0.32 : camera.status === 'operativa' ? 0.2 : 0.1,
-    stroke: color,
-    strokeWidth: 1.5 / scale,
-    dash: camera.status === 'operativa' ? undefined : [6 / scale, 4 / scale],
-    listening: false,
-  };
-  if (camera.fov_deg >= 360) return <Circle {...common} />;
-  return <Wedge {...common} angle={camera.fov_deg} rotation={camera.rotation_deg - camera.fov_deg / 2} />;
-}
 
 interface MarkerProps {
   camera: Camera;
@@ -42,9 +17,10 @@ interface MarkerProps {
   highlightKey?: number;
   editable: boolean;
   showLabel: boolean;
-  onSelect: () => void;
-  onMove: (pos: { pos_x: number; pos_y: number }, final: boolean) => void;
-  onRotate: (deg: number, final: boolean) => void;
+  // Callbacks estables (reciben el id) para que memo evite re-renderizar todas las cámaras
+  onSelect: (id: string) => void;
+  onMove: (id: string, pos: { pos_x: number; pos_y: number }, final: boolean) => void;
+  onRotate: (id: string, deg: number, final: boolean) => void;
 }
 
 /** Anillos expansivos alrededor de la cámara encontrada por el buscador. */
@@ -76,7 +52,22 @@ function PulseRing() {
   );
 }
 
-export function CameraMarker({ camera, imgW, imgH, scale, selected, highlightKey, editable, showLabel, onSelect, onMove, onRotate }: MarkerProps) {
+export const CameraMarker = memo(function CameraMarker({
+  camera,
+  imgW,
+  imgH,
+  scale,
+  selected,
+  highlightKey,
+  editable,
+  showLabel,
+  onSelect: onSelectId,
+  onMove: onMoveId,
+  onRotate: onRotateId,
+}: MarkerProps) {
+  const onSelect = () => onSelectId(camera.id);
+  const onMove = (pos: { pos_x: number; pos_y: number }, final: boolean) => onMoveId(camera.id, pos, final);
+  const onRotate = (deg: number, final: boolean) => onRotateId(camera.id, deg, final);
   const t = CAMERA_TYPES[camera.type];
   const ring = CAMERA_STATUS[camera.status].color;
   const inv = 1 / scale; // tamaño constante en pantalla
@@ -163,4 +154,4 @@ export function CameraMarker({ camera, imgW, imgH, scale, selected, highlightKey
       )}
     </Group>
   );
-}
+});

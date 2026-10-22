@@ -76,6 +76,8 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       CORS_ORIGIN: https://${DOMAIN}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      PLAN_MAX_UPLOAD_MB: ${PLAN_MAX_UPLOAD_MB:-200}
+      PLAN_MAX_MEGAPIXELS: ${PLAN_MAX_MEGAPIXELS:-400}
       PLANS_DIR: /data/plans
       UPLOADS_DIR: /data/uploads
       DOCUMENTS_DIR: /data/documents
