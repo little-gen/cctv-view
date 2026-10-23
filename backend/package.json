@@ -16,6 +16,7 @@
     "seed:prod": "node dist/db/seed.js",
     "smoke": "node scripts/smoke.mjs",
     "search-check": "node scripts/search-check.mjs",
+    "nvr-check": "node scripts/nvr-check.mjs",
     "plans:tiles": "tsx src/db/generate-tiles.ts"
   },
   "dependencies": {

@@ -149,7 +149,7 @@ paths:
 
   /projects/{id}/nvrs:
     parameters: [{ $ref: '#/components/parameters/id' }]
-    get: { tags: [NVR], summary: Listar NVR del proyecto, responses: { '200': { description: OK } } }
+    get: { tags: [NVR], summary: Listar NVR del proyecto (incluye `camera_count`), responses: { '200': { description: OK } } }
     post:
       tags: [NVR]
       summary: Crear NVR
@@ -157,8 +157,31 @@ paths:
       responses: { '201': { description: Creado } }
   /nvrs/{id}:
     parameters: [{ $ref: '#/components/parameters/id' }]
-    patch: { tags: [NVR], summary: Modificar NVR, responses: { '200': { description: OK } } }
-    delete: { tags: [NVR], summary: Eliminar NVR, responses: { '204': { description: Eliminado } } }
+    get: { tags: [NVR], summary: Detalle del NVR con sus cámaras por orden de canal, responses: { '200': { description: OK } } }
+    patch:
+      tags: [NVR]
+      summary: Modificar NVR
+      description: No se pueden dejar menos canales que cámaras asociadas ni que el canal más alto en uso (409).
+      responses: { '200': { description: OK }, '409': { description: Canales en uso } }
+    delete: { tags: [NVR], summary: Eliminar NVR (sus cámaras quedan sin NVR), responses: { '204': { description: Eliminado } } }
+  /nvrs/{id}/cameras:
+    parameters: [{ $ref: '#/components/parameters/id' }]
+    post:
+      tags: [NVR]
+      summary: Asociar cámaras al NVR (las que tenían otro NVR se mueven)
+      description: |
+        Cada cámara recibe el primer canal libre (o conserva el suyo si está libre en este NVR).
+        Si no hay canales libres suficientes no se asocia ninguna (409, `details.code = NVR_CAPACITY`).
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [cameraIds], properties: { cameraIds: { type: array, items: { type: string, format: uuid } } } }
+      responses: { '200': { description: Cámaras actualizadas }, '409': { description: Sin canales libres } }
+  /nvrs/{id}/cameras/{cameraId}:
+    parameters:
+      - { $ref: '#/components/parameters/id' }
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete: { tags: [NVR], summary: Desasociar la cámara del NVR, responses: { '200': { description: Cámara actualizada } } }
 
   /projects/{id}/cameras:
     parameters: [{ $ref: '#/components/parameters/id' }]
@@ -328,13 +351,13 @@ components:
             broken_count: { type: integer }
     NvrInput:
       type: object
-      required: [name]
+      required: [name, channels]
       properties:
         name: { type: string }
         brand: { type: [string, 'null'] }
         model: { type: [string, 'null'] }
         ip_address: { type: [string, 'null'] }
-        channels: { type: [integer, 'null'] }
+        channels: { type: integer, minimum: 1, description: 'Obligatorio al crear. Los NVR antiguos sin canales se muestran como "capacidad sin definir"' }
         location: { type: [string, 'null'] }
         notes: { type: [string, 'null'] }
     CameraInput:
@@ -343,6 +366,7 @@ components:
       properties:
         floor_plan_id: { type: string, format: uuid }
         nvr_id: { type: [string, 'null'], format: uuid }
+        channel: { type: [integer, 'null'], minimum: 1, description: Canal del NVR; si se omite se asigna el primero libre }
         code: { type: string, example: CAM-001 }
         name: { type: string }
         type: { $ref: '#/components/schemas/CameraType' }

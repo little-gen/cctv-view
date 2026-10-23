@@ -6,6 +6,7 @@ import { CAMERA_STATUS, CAMERA_TYPES } from '@/lib/cameraTypes';
 import type { Camera } from '@/types';
 
 const HANDLE_DIST = 38; // px de pantalla
+export const NVR_RING = '#4fd1e8';
 
 interface MarkerProps {
   camera: Camera;
@@ -17,6 +18,8 @@ interface MarkerProps {
   highlightKey?: number;
   editable: boolean;
   showLabel: boolean;
+  /** NVR resaltado: las cámaras de otro NVR se atenúan y las suyas llevan un anillo */
+  nvrMark?: 'in' | 'out';
   // Callbacks estables (reciben el id) para que memo evite re-renderizar todas las cámaras
   onSelect: (id: string) => void;
   onMove: (id: string, pos: { pos_x: number; pos_y: number }, final: boolean) => void;
@@ -61,6 +64,7 @@ export const CameraMarker = memo(function CameraMarker({
   highlightKey,
   editable,
   showLabel,
+  nvrMark,
   onSelect: onSelectId,
   onMove: onMoveId,
   onRotate: onRotateId,
@@ -95,6 +99,7 @@ export const CameraMarker = memo(function CameraMarker({
       y={camera.pos_y * imgH}
       scaleX={inv}
       scaleY={inv}
+      opacity={nvrMark === 'out' ? 0.25 : 1}
       draggable={editable}
       onClick={(e) => { e.cancelBubble = true; onSelect(); }}
       onTap={(e) => { e.cancelBubble = true; onSelect(); }}
@@ -110,6 +115,7 @@ export const CameraMarker = memo(function CameraMarker({
       )}
       {highlightKey !== undefined && <PulseRing key={highlightKey} />}
       {selected && <Circle radius={18} stroke="#ffffff" strokeWidth={2} dash={[4, 3]} listening={false} />}
+      {nvrMark === 'in' && <Circle radius={16} stroke={NVR_RING} strokeWidth={4} listening={false} />}
 
       {/* Área de toque más grande que el icono (móvil) */}
       <Circle radius={20} fill="transparent" />

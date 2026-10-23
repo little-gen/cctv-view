@@ -2,7 +2,7 @@ import Konva from 'konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import { Maximize2, Minus, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react';
-import { Image as KImage, Layer, Stage } from 'react-konva';
+import { Group, Image as KImage, Layer, Stage } from 'react-konva';
 import { usePlanPreview, usePlanTiles } from '@/api/hooks';
 import { renderCoverage, type CoverageGrid } from '@/lib/coverage';
 import { useDebouncedValue, useElementSize } from '@/lib/hooks';
@@ -22,6 +22,8 @@ interface Props {
   cameras: Camera[];
   coverage: CoverageGrid | null;
   editable: boolean;
+  /** Cámaras del NVR resaltado (null = sin resaltado) */
+  nvrGroup: Set<string> | null;
   onCreate: (type: CameraType, pos: { pos_x: number; pos_y: number }) => void;
   onUpdate: (id: string, patch: CameraInput) => void;
 }
@@ -32,7 +34,7 @@ type View = { scale: number; x: number; y: number };
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 8;
 
-export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpdate }: Props) {
+export function PlanCanvas({ plan, cameras, coverage, editable, nvrGroup, onCreate, onUpdate }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const size = useElementSize(containerRef);
@@ -43,7 +45,7 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
   const info = tiles.data;
   const preview = usePlanPreview(plan.id, info?.version);
 
-  const { selectedId, select, focus, clearFocus, placingType, setPlacingType, showCones, showLabels, coverageMode } = useEditor();
+  const { selectedId, select, focus, clearFocus, placingType, setPlacingType, showCones, showLabels, coverageMode, nvrHighlight } = useEditor();
   const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
   // Estado transitorio mientras se arrastra/rota (se confirma al soltar)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -116,6 +118,24 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
     setHighlight({ id: cam.id, nonce: focus.nonce });
     clearFocus();
   }, [focus, size.width, size.height, cameras, plan.id, plan.version, imgW, imgH, pxPerM, clearFocus]);
+
+  // Encuadrar las cámaras del NVR resaltado (una vez por petición)
+  const nvrFitted = useRef(0);
+  useEffect(() => {
+    if (!nvrHighlight || !nvrGroup || nvrFitted.current === nvrHighlight.nonce) return;
+    if (!size.width || !size.height || fittedFor.current !== `${plan.id}:${plan.version}`) return;
+    nvrFitted.current = nvrHighlight.nonce;
+    const group = cameras.filter((c) => nvrGroup.has(c.id));
+    if (!group.length) return;
+    const xs = group.map((c) => c.pos_x * imgW);
+    const ys = group.map((c) => c.pos_y * imgH);
+    // Margen: un 15 % del grupo y al menos 12 m, para ver también lo que rodea a las cámaras
+    const pad = Math.max(0.15 * Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)), 12 * pxPerM);
+    const [x0, x1, y0, y1] = [Math.min(...xs) - pad, Math.max(...xs) + pad, Math.min(...ys) - pad, Math.max(...ys) + pad];
+    const fitScale = Math.min(size.width / imgW, size.height / imgH) * 0.95;
+    const scale = Math.min(MAX_SCALE, Math.max(fitScale, Math.min(size.width / (x1 - x0), size.height / (y1 - y0))));
+    setView({ scale, x: size.width / 2 - ((x0 + x1) / 2) * scale, y: size.height / 2 - ((y0 + y1) / 2) * scale });
+  }, [nvrHighlight, nvrGroup, cameras, size.width, size.height, plan.id, plan.version, imgW, imgH, pxPerM]);
 
   useEffect(() => {
     if (!highlight) return;
@@ -220,6 +240,10 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
 
   const shown = useMemo(() => cameras.map((c) => (drafts[c.id] ? { ...c, ...drafts[c.id] } : c)), [cameras, drafts]);
   const selected = shown.find((c) => c.id === selectedId);
+  const coneSplit = useMemo(
+    () => ({ in: shown.filter((c) => nvrGroup?.has(c.id)), out: shown.filter((c) => !nvrGroup?.has(c.id)) }),
+    [shown, nvrGroup],
+  );
 
   // ------------------------------------------------- teselas visibles
   // Nivel y área se calculan con la vista "asentada" (120 ms sin cambios) para no descargar
@@ -292,8 +316,17 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
             )}
           </Layer>
           <Layer listening={false}>
-            {showCones && (
+            {showCones && !nvrGroup && (
               <CoverageCones cameras={shown} selectedId={selectedId} imgW={imgW} imgH={imgH} pxPerM={pxPerM} view={view} viewport={size} />
+            )}
+            {/* Con un NVR resaltado, los conos del resto se atenúan */}
+            {showCones && nvrGroup && (
+              <>
+                <Group opacity={0.2}>
+                  <CoverageCones cameras={coneSplit.out} selectedId={selectedId} imgW={imgW} imgH={imgH} pxPerM={pxPerM} view={view} viewport={size} />
+                </Group>
+                <CoverageCones cameras={coneSplit.in} selectedId={selectedId} imgW={imgW} imgH={imgH} pxPerM={pxPerM} view={view} viewport={size} />
+              </>
             )}
           </Layer>
           <Layer>
@@ -312,6 +345,7 @@ export function PlanCanvas({ plan, cameras, coverage, editable, onCreate, onUpda
                   highlightKey={highlight?.id === c.id ? highlight.nonce : undefined}
                   editable={editable}
                   showLabel={showLabels}
+                  nvrMark={nvrGroup ? (nvrGroup.has(c.id) ? 'in' : 'out') : undefined}
                   onSelect={select}
                   onMove={patchDraft}
                   onRotate={onMarkerRotate}

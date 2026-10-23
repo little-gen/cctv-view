@@ -62,6 +62,15 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
   const pgCode = (err as { code?: string }).code;
+  // Reglas de capacidad de los NVR (migración 004): el mensaje ya es para el usuario
+  if (pgCode?.startsWith('NV')) {
+    res.status(409).json({ error: message, details: { code: 'NVR_CAPACITY' } });
+    return;
+  }
+  if (pgCode === '23505' && (err as { constraint?: string }).constraint === 'cameras_nvr_channel_key') {
+    res.status(409).json({ error: 'Ese canal del NVR ya está ocupado por otra cámara' });
+    return;
+  }
   if (pgCode && PG_ERRORS[pgCode]) {
     const [status, message] = PG_ERRORS[pgCode];
     res.status(status).json({ error: message, details: (err as { detail?: string }).detail });

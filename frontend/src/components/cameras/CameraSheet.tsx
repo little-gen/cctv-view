@@ -1,12 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Camera as CameraIcon, Download, FileText, Trash2, Upload, X } from 'lucide-react';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { Camera as CameraIcon, Download, FileText, Highlighter, Server, Trash2, Upload, X } from 'lucide-react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Link } from 'react-router';
 import { downloadFile } from '@/api/client';
 import {
   qk,
   useAttachments,
   useAuthedObjectUrl,
   useCameraHistory,
+  useCameras,
   useDeleteAttachment,
   useDeleteCamera,
   useNvrs,
@@ -14,9 +16,11 @@ import {
   useUploadAttachments,
 } from '@/api/hooks';
 import { useAuth } from '@/auth/AuthContext';
+import { OccupancyNotice } from '@/components/nvr/OccupancyBar';
 import { ErrorText } from '@/components/ui/Modal';
 import { AUDIT_ACTION_LABEL } from '@/lib/audit';
 import { CAMERA_STATUS, CAMERA_STATUS_KEYS, CAMERA_TYPE_KEYS, CAMERA_TYPES } from '@/lib/cameraTypes';
+import { channelLabel, nvrUsage } from '@/lib/nvr';
 import { useEditor } from '@/store/editorStore';
 import type { Attachment, Camera, CameraInput } from '@/types';
 import { CameraGlyph, StatusBadge } from './CameraGlyph';
@@ -26,6 +30,8 @@ type Tab = 'ficha' | 'cobertura' | 'adjuntos' | 'historial';
 export function CameraSheet({ camera }: { camera: Camera }) {
   const [tab, setTab] = useState<Tab>('ficha');
   const select = useEditor((s) => s.select);
+  const { nvrHighlight, highlightNvr } = useEditor();
+  const nvrHighlighted = !!camera.nvr_id && nvrHighlight?.id === camera.nvr_id;
 
   return (
     <aside className="flex h-full w-full flex-col border-l border-line bg-surface lg:w-96" aria-label="Ficha de cámara">
@@ -35,6 +41,26 @@ export function CameraSheet({ camera }: { camera: Camera }) {
           <h2 className="truncate font-semibold">{camera.name}</h2>
           <div className="flex items-center gap-2 text-xs text-muted">
             <span>{camera.code}</span>·<span>{CAMERA_TYPES[camera.type].label}</span>·<StatusBadge status={camera.status} />
+          </div>
+          {/* Grabación: NVR y canal */}
+          <div className="mt-1 flex items-center gap-2 text-xs">
+            <Server className="size-3.5 shrink-0 text-muted" aria-hidden />
+            {camera.nvr_id ? (
+              <>
+                <Link to={`/projects/${camera.project_id}/nvrs/${camera.nvr_id}`} className="truncate text-ink-2 hover:underline">{camera.nvr_name}</Link>
+                <span className="shrink-0 text-muted tabular-nums">· {channelLabel(camera.channel)}</span>
+                <button
+                  className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 ${nvrHighlighted ? 'bg-accent/20 text-ink' : 'text-muted hover:text-ink'}`}
+                  onClick={() => highlightNvr(nvrHighlighted ? null : camera.nvr_id)}
+                  aria-pressed={nvrHighlighted}
+                  title="Resaltar en el plano las cámaras de este NVR"
+                >
+                  <Highlighter className="size-3" /> Resaltar NVR
+                </button>
+              </>
+            ) : (
+              <span className="text-amber-300">Sin NVR asignado</span>
+            )}
           </div>
         </div>
         <button className="btn-ghost px-1.5" onClick={() => select(null)} aria-label="Cerrar ficha">
@@ -84,23 +110,49 @@ function DetailsForm({ camera }: { camera: Camera }) {
   const update = useUpdateCamera(camera.project_id);
   const remove = useDeleteCamera(camera.project_id);
   const { data: nvrs } = useNvrs(camera.project_id);
+  const { data: projectCameras = [] } = useCameras(camera.project_id);
   const select = useEditor((s) => s.select);
   const [form, setForm] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      [...TEXT_FIELDS.map((f) => f.key), 'type', 'status', 'nvr_id', 'physical_location', 'notes'].map((k) => [
+      [...TEXT_FIELDS.map((f) => f.key), 'type', 'status', 'nvr_id', 'channel', 'physical_location', 'notes'].map((k) => [
         k,
         String(camera[k as keyof Camera] ?? ''),
       ]),
     ),
   );
   const set = (k: string) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  // Al cambiar de NVR, el canal vuelve a "automático" (el servidor asigna el primero libre)
+  const setNvr = (e: { target: { value: string } }) => setForm((f) => ({ ...f, nvr_id: e.target.value, channel: '' }));
+
+  // Cámaras y canales ocupados de cada NVR sin contar esta cámara
+  const occupancy = useMemo(() => {
+    const taken = new Map<string, Set<number>>();
+    const count = new Map<string, number>();
+    for (const c of projectCameras) {
+      if (!c.nvr_id || c.id === camera.id) continue;
+      count.set(c.nvr_id, (count.get(c.nvr_id) ?? 0) + 1);
+      if (c.channel) {
+        if (!taken.has(c.nvr_id)) taken.set(c.nvr_id, new Set());
+        taken.get(c.nvr_id)?.add(c.channel);
+      }
+    }
+    return { taken, count };
+  }, [projectCameras, camera.id]);
+  const targetNvr = nvrs?.find((n) => n.id === form.nvr_id);
+  const targetUsage = targetNvr ? nvrUsage(targetNvr, (occupancy.count.get(targetNvr.id) ?? 0) + 1) : null;
+  const channelOptions = useMemo(() => {
+    if (!targetNvr) return [];
+    const taken = occupancy.taken.get(targetNvr.id) ?? new Set<number>();
+    const max = targetNvr.channels ?? Math.max(0, ...taken) + 8;
+    return Array.from({ length: max }, (_, i) => ({ ch: i + 1, taken: taken.has(i + 1) }));
+  }, [targetNvr, occupancy]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     // Solo se envían los campos modificados; '' -> null
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(form)) {
-      if (v !== String(camera[k as keyof Camera] ?? '')) patch[k] = v === '' ? null : v;
+      if (v !== String(camera[k as keyof Camera] ?? '')) patch[k] = v === '' ? null : k === 'channel' ? Number(v) : v;
     }
     if (Object.keys(patch).length) update.mutate({ id: camera.id, ...(patch as CameraInput) });
   };
@@ -128,12 +180,32 @@ function DetailsForm({ camera }: { camera: Camera }) {
             <input className="input" type={f.type ?? 'text'} placeholder={f.placeholder} value={form[f.key]} onChange={set(f.key)} />
           </Field>
         ))}
-        <Field label="NVR asociado" wide>
-          <select className="input" value={form.nvr_id} onChange={set('nvr_id')}>
+        <Field label="NVR asociado">
+          <select className="input" value={form.nvr_id} onChange={setNvr}>
             <option value="">— Sin NVR —</option>
-            {nvrs?.map((n) => <option key={n.id} value={n.id}>{n.name}{n.ip_address ? ` (${n.ip_address})` : ''}</option>)}
+            {nvrs?.map((n) => {
+              const isCurrent = n.id === camera.nvr_id;
+              const u = nvrUsage(n, (occupancy.count.get(n.id) ?? 0) + (isCurrent ? 1 : 0));
+              const isFull = u.free === 0 && !isCurrent;
+              return (
+                <option key={n.id} value={n.id} disabled={isFull}>
+                  {n.name} {u.total ? `(${u.used}/${u.total}${isFull ? ', completo' : ''})` : '(capacidad sin definir)'}
+                </option>
+              );
+            })}
           </select>
         </Field>
+        <Field label="Canal">
+          <select className="input" value={form.channel} onChange={set('channel')} disabled={!form.nvr_id}>
+            <option value="">{form.nvr_id ? 'Automático' : '—'}</option>
+            {channelOptions.map(({ ch, taken }) => (
+              <option key={ch} value={ch} disabled={taken}>{channelLabel(ch)}{taken ? ' (ocupado)' : ''}</option>
+            ))}
+          </select>
+        </Field>
+        {targetNvr && targetUsage && form.nvr_id !== (camera.nvr_id ?? '') && (
+          <div className="col-span-2"><OccupancyNotice usage={targetUsage} name={targetNvr.name} /></div>
+        )}
         <Field label="Ubicación física" wide>
           <input className="input" placeholder="Fachada norte, muelle 3, h=6 m…" value={form.physical_location} onChange={set('physical_location')} />
         </Field>

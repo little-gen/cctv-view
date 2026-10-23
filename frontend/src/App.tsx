@@ -5,6 +5,7 @@ import { AppShell } from './components/layout/AppShell';
 import { AuditPage } from './pages/AuditPage';
 import { ForcePasswordChangePage } from './pages/ForcePasswordChangePage';
 import { LoginPage } from './pages/LoginPage';
+import { NvrDetailPage, NvrListPage } from './pages/NvrPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { UsersPage } from './pages/UsersPage';
@@ -36,6 +37,8 @@ export function App() {
         <Route index element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<WorkspacePage />} />
         <Route path="projects/:projectId/plans/:planId" element={<WorkspacePage />} />
+        <Route path="projects/:projectId/nvrs" element={<NvrListPage />} />
+        <Route path="projects/:projectId/nvrs/:nvrId" element={<NvrDetailPage />} />
         <Route path="admin/users" element={<RequireAuth admin><UsersPage /></RequireAuth>} />
         <Route path="admin/audit" element={<RequireAuth admin><AuditPage /></RequireAuth>} />
       </Route>

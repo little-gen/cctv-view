@@ -33,14 +33,15 @@ async function seed(projects: number, perProject: number) {
       );
       const { rows: nvrs } = await client.query<{ id: string }>(
         `INSERT INTO nvrs (project_id, name, ip_address, channels)
-         SELECT $1, 'NVR-' || lpad(n::text, 2, '0'), ('10.' || $2::int || '.0.' || n)::inet, 64 FROM generate_series(1, 2) n
-         RETURNING id`,
-        [project.id, i % 250],
+         SELECT $1, 'NVR-' || lpad(n::text, 2, '0'), ('10.' || $2::int || '.0.' || n)::inet, 64 FROM generate_series(1, $3) n
+         ORDER BY n RETURNING id`,
+        // 64 canales por NVR (la BD no permite superar la capacidad)
+        [project.id, i % 250, Math.max(2, Math.ceil(perProject / 64))],
       );
       await client.query(
         `INSERT INTO cameras (project_id, floor_plan_id, nvr_id, code, name, type, brand, model, ip_address,
                               physical_location, status, notes, installed_at, pos_x, pos_y, rotation_deg, fov_deg, range_m)
-         SELECT $1, $2, ($3::uuid[])[1 + g % 2],
+         SELECT $1, $2, ($3::uuid[])[1 + (g - 1) / 64],
                 'CAM-' || lpad(g::text, 3, '0'),
                 ($4::text[])[1 + g % array_length($4::text[], 1)] || ' ' || g,
                 ($5::text[])[1 + (g * 7 + $9) % 5]::camera_type,

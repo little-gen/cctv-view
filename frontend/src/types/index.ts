@@ -65,6 +65,8 @@ export interface Camera {
   floor_plan_id: string;
   nvr_id: string | null;
   nvr_name?: string | null;
+  /** Canal del NVR (lo asigna el servidor si no se indica) */
+  channel: number | null;
   code: string;
   name: string;
   type: CameraType;

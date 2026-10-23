@@ -31,6 +31,7 @@ export interface CameraRow {
   floor_plan_id: string;
   nvr_id: string | null;
   nvr_name?: string | null;
+  channel: number | null;
   code: string;
   name: string;
   type: CameraType;

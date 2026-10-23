@@ -37,6 +37,7 @@ Otros comandos:
 - `npm run smoke -w backend`: prueba end-to-end de la API (con la API arrancada y la BD migrada + seed).
 - `npm run seed:bulk -w backend -- 300 100`: 300 proyectos × 100 cámaras de demo (`-- --clean` para borrarlos).
 - `npm run search-check -w backend`: pruebas funcionales y de rendimiento de la búsqueda global (requiere `seed:bulk`).
+- `npm run nvr-check -w backend`: gestión de NVR (capacidad, canales, mover/desasociar, permisos y auditoría); crea y borra sus propios datos.
 
 La migración `002` necesita las extensiones `pg_trgm` y `unaccent` (incluidas en PostgreSQL; el usuario `planos` de Docker puede crearlas).
 
@@ -92,7 +93,10 @@ PlanosCamaras/
 | GET/PATCH/DELETE | `/api/cameras/:id` | Ficha de cámara |
 | GET | `/api/cameras/:id/history` | Historial de cambios |
 | GET/POST | `/api/cameras/:id/attachments` | Fotos y documentos |
-| GET/POST | `/api/projects/:id/nvrs` | NVR |
+| GET/POST | `/api/projects/:id/nvrs` | NVR del proyecto (con nº de cámaras) / crear (canales obligatorios) |
+| GET/PATCH/DELETE | `/api/nvrs/:id` | Detalle con sus cámaras por canal / modificar / eliminar |
+| POST | `/api/nvrs/:id/cameras` | Asociar o mover cámaras (409 si no hay canales libres) |
+| DELETE | `/api/nvrs/:id/cameras/:cameraId` | Desasociar |
 | GET | `/api/plans/:id/export/pdf` | Plano con cámaras (PDF A3) |
 | GET | `/api/projects/:id/export/report.pdf` | Informe técnico |
 | GET | `/api/projects/:id/export/inventory.xlsx` | Inventario Excel |

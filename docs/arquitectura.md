@@ -78,7 +78,7 @@
 
 ## Evolución prevista
 
-1. **ONVIF**: ya existen `onvif_url` y `onvif_username` en `cameras`. Añadir un módulo `onvif` (paquete `onvif` de npm) con *discovery* WS en la LAN del NVR, lectura de `GetDeviceInformation` (marca, modelo, firmware, MAC) para autocompletar la ficha, *snapshot* para la foto de referencia y comprobación periódica del estado (job → `status`). Las credenciales irían a un almacén de secretos, no a la tabla.
+1. **ONVIF**: ya existen `onvif_url` y `onvif_username` en `cameras`. Añadir un módulo `onvif` (paquete `onvif` de npm) con *discovery* WS en la LAN del NVR, lectura de `GetDeviceInformation` (marca, modelo, firmware, MAC) para autocompletar la ficha, *snapshot* para la foto de referencia y comprobación periódica del estado (job → `status`): será el «estado de conexión» real de la ficha y de la pantalla de NVR, que hoy muestran el estado manual. Requiere que la VM llegue por red a las cámaras (puertos 80/554). Las credenciales irían a un almacén de secretos, no a la tabla.
 2. **Cobertura realista**: polígonos de «zona a vigilar» y de obstáculos (muros, estanterías) por plano; *raycasting* desde cada cámara. Se puede mover a un Web Worker si crece el número de cámaras.
 3. **Almacenamiento S3/MinIO**: implementar `StorageDriver` y elegirlo por variable de entorno.
 4. **Multi-planta**: el modelo ya admite varios planos por proyecto; añadir vistas por edificio o planta.

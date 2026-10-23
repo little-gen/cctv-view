@@ -2,18 +2,19 @@ import { ChevronLeft, Download, FileSpreadsheet, FileText, Layers, ListFilter, M
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { downloadFile } from '@/api/client';
-import { useCameras, useCreateCamera, useProject, useUpdateCamera } from '@/api/hooks';
+import { useCameras, useCreateCamera, useNvrs, useProject, useUpdateCamera } from '@/api/hooks';
 import { useAuth } from '@/auth/AuthContext';
 import { CameraSheet } from '@/components/cameras/CameraSheet';
 import { CameraSidebar } from '@/components/cameras/CameraSidebar';
 import { CameraPalette } from '@/components/plan/CameraPalette';
-import { NvrModal } from '@/components/plan/NvrModal';
+import { NvrHighlightBar } from '@/components/nvr/NvrHighlightBar';
 import { PlanCanvas } from '@/components/plan/PlanCanvas';
 import { PlanSettingsModal } from '@/components/plan/PlanSettingsModal';
 import { PlanUpload } from '@/components/plan/PlanUpload';
 import { Dropdown, MenuItem, MenuToggle } from '@/components/ui/Dropdown';
 import { computeCoverage, HEATMAP_LEGEND } from '@/lib/coverage';
 import { filterCameras } from '@/lib/filters';
+import { inNvrGroup, NO_NVR } from '@/lib/nvr';
 import { useEditor } from '@/store/editorStore';
 import type { CameraType } from '@/types';
 
@@ -25,10 +26,11 @@ export function WorkspacePage() {
   const { canEdit } = useAuth();
   const { data: project, isLoading } = useProject(projectId);
   const { data: cameras = [] } = useCameras(projectId);
+  const { data: nvrs = [] } = useNvrs(projectId);
   const createCamera = useCreateCamera(projectId);
   const updateCamera = useUpdateCamera(projectId);
   const editor = useEditor();
-  const [modal, setModal] = useState<'newPlan' | 'planSettings' | 'nvr' | null>(null);
+  const [modal, setModal] = useState<'newPlan' | 'planSettings' | null>(null);
 
   const plan = project?.plans.find((p) => p.id === planId) ?? project?.plans[0];
 
@@ -41,7 +43,39 @@ export function WorkspacePage() {
   useEffect(() => editor.select(null), [plan?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const planCameras = useMemo(() => cameras.filter((c) => c.floor_plan_id === plan?.id), [cameras, plan?.id]);
-  const visible = useMemo(() => filterCameras(planCameras, editor.filters), [planCameras, editor.filters]);
+
+  // NVR resaltado (desde la Topología o la pantalla de NVR): sus cámaras de este plano
+  const nvrGroupId = editor.nvrHighlight?.id ?? null;
+  const nvrGroup = useMemo(
+    () => (nvrGroupId ? new Set(planCameras.filter((c) => inNvrGroup(c, nvrGroupId)).map((c) => c.id)) : null),
+    [planCameras, nvrGroupId],
+  );
+  const visible = useMemo(() => {
+    const filtered = filterCameras(planCameras, editor.filters);
+    return nvrGroup && editor.nvrOnly ? filtered.filter((c) => nvrGroup.has(c.id)) : filtered;
+  }, [planCameras, editor.filters, nvrGroup, editor.nvrOnly]);
+
+  // El resaltado es de este proyecto: se quita al cambiar de proyecto
+  useEffect(() => () => editor.highlightNvr(null), [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Llegada desde la pantalla de NVR: ?nvr=<id|__none__>. Se abre el plano con más
+  // cámaras de ese NVR (si el actual no tiene ninguna) y se resaltan.
+  const targetNvr = searchParams.get('nvr');
+  useEffect(() => {
+    if (!targetNvr || !project || !cameras.length) return;
+    const group = cameras.filter((c) => inNvrGroup(c, targetNvr));
+    if (plan && !group.some((c) => c.floor_plan_id === plan.id) && group.length) {
+      const count = new globalThis.Map<string, number>(); // "Map" es el icono de lucide
+      for (const c of group) count.set(c.floor_plan_id, (count.get(c.floor_plan_id) ?? 0) + 1);
+      const best = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      navigate(`/projects/${projectId}/plans/${best}?nvr=${encodeURIComponent(targetNvr)}`, { replace: true });
+      return;
+    }
+    if (targetNvr !== NO_NVR && !nvrs.some((n) => n.id === targetNvr)) return; // esperar a la lista de NVR
+    editor.highlightNvr(targetNvr);
+    editor.setSidebarTab('topologia');
+    setSearchParams({}, { replace: true });
+  }, [targetNvr, project, cameras, nvrs, plan?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Llegada desde el buscador global: ?camera=<id>[&select=0]. Se espera a que carguen
   // las cámaras del plano; si los filtros locales la ocultan, se quitan; después se
@@ -100,9 +134,9 @@ export function WorkspacePage() {
         )}
 
         <div className="ml-auto flex items-center gap-1">
-          <button className="btn-ghost px-2" onClick={() => setModal('nvr')} title="NVR">
+          <Link className="btn-ghost px-2" to={`/projects/${projectId}/nvrs`} title="Grabadores (NVR)">
             <Server className="size-4" /><span className="hidden md:inline">NVR</span>
-          </button>
+          </Link>
           <Dropdown trigger={<button className="btn-ghost px-2" title="Capas"><Layers className="size-4" /><span className="hidden md:inline">Capas</span></button>}>
             <MenuToggle checked={editor.showCones} onChange={() => editor.toggle('showCones')}>Conos de visión</MenuToggle>
             <MenuToggle checked={editor.showLabels} onChange={() => editor.toggle('showLabels')}>Etiquetas</MenuToggle>
@@ -138,7 +172,12 @@ export function WorkspacePage() {
         {/* Panel lateral: fijo en escritorio, superpuesto en tablet/móvil */}
         {editor.sidebarOpen && (
           <div className="absolute inset-y-0 left-0 z-20 w-full max-w-sm shadow-2xl lg:static lg:w-auto lg:max-w-none lg:shadow-none">
-            <CameraSidebar allCameras={planCameras} visibleCameras={visible} coverageRatio={coverage?.coveredRatio ?? null} />
+            <CameraSidebar
+              allCameras={planCameras}
+              visibleCameras={visible}
+              coverageRatio={coverage?.coveredRatio ?? null}
+              topology={{ project, plan: plan ?? null, cameras, nvrs }}
+            />
           </div>
         )}
 
@@ -159,10 +198,20 @@ export function WorkspacePage() {
                 cameras={visible}
                 coverage={coverage}
                 editable={canEdit}
+                nvrGroup={nvrGroup}
                 onCreate={onCreate}
                 onUpdate={(id, patch) => updateCamera.mutate({ id, ...patch })}
               />
               {canEdit && <CameraPalette />}
+              {editor.nvrHighlight && (
+                <NvrHighlightBar
+                  groupId={editor.nvrHighlight.id}
+                  nvrs={nvrs}
+                  cameras={cameras}
+                  onPlan={nvrGroup?.size ?? 0}
+                  projectId={projectId}
+                />
+              )}
               {editor.coverageMode !== 'none' && <CoverageLegend mode={editor.coverageMode} />}
             </>
           )}
@@ -180,7 +229,6 @@ export function WorkspacePage() {
         <PlanSettingsModal projectId={projectId} onClose={() => setModal(null)} onCreated={(p) => navigate(`/projects/${projectId}/plans/${p.id}`)} />
       )}
       {modal === 'planSettings' && plan && <PlanSettingsModal projectId={projectId} plan={plan} onClose={() => setModal(null)} />}
-      {modal === 'nvr' && <NvrModal projectId={projectId} onClose={() => setModal(null)} />}
     </div>
   );
 }

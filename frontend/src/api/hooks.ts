@@ -132,6 +132,7 @@ export function useUpdateCamera(projectId: string) {
     onSuccess: (cam) => {
       qc.setQueryData<Camera[]>(key, (old) => old?.map((c) => (c.id === cam.id ? cam : c)));
       qc.invalidateQueries({ queryKey: qk.history(cam.id) });
+      qc.invalidateQueries({ queryKey: qk.nvrs(projectId) });
       qc.invalidateQueries({ queryKey: qk.search });
     },
   });
@@ -163,6 +164,18 @@ export function useCreateNvr(projectId: string) {
   });
 }
 
+export function useUpdateNvr(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: Partial<Nvr> & { id: string }) => api<Nvr>(`/nvrs/${id}`, { method: 'PATCH', body: data }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.nvrs(projectId) });
+      qc.invalidateQueries({ queryKey: qk.cameras(projectId) }); // nvr_name de las cámaras
+      qc.invalidateQueries({ queryKey: qk.search });
+    },
+  });
+}
+
 export function useDeleteNvr(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -170,9 +183,36 @@ export function useDeleteNvr(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.nvrs(projectId) });
       qc.invalidateQueries({ queryKey: qk.cameras(projectId) });
+      qc.invalidateQueries({ queryKey: qk.search });
     },
   });
 }
+
+/** Cambios de NVR de cámaras: se sustituyen en la caché del proyecto y se refrescan los contadores. */
+function useCameraNvrMutation<V>(projectId: string, fn: (v: V) => Promise<Camera | Camera[]>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (res) => {
+      const changed = new Map((Array.isArray(res) ? res : [res]).map((c) => [c.id, c]));
+      qc.setQueryData<Camera[]>(qk.cameras(projectId), (old) => old?.map((c) => changed.get(c.id) ?? c));
+      qc.invalidateQueries({ queryKey: qk.nvrs(projectId) });
+      qc.invalidateQueries({ queryKey: qk.search });
+      for (const id of changed.keys()) qc.invalidateQueries({ queryKey: qk.history(id) });
+    },
+  });
+}
+
+/** Asocia cámaras a un NVR; las que tenían otro NVR se mueven. */
+export const useAssignToNvr = (projectId: string) =>
+  useCameraNvrMutation(projectId, ({ nvrId, cameraIds }: { nvrId: string; cameraIds: string[] }) =>
+    api<Camera[]>(`/nvrs/${nvrId}/cameras`, { method: 'POST', body: { cameraIds } }),
+  );
+
+export const useUnassignFromNvr = (projectId: string) =>
+  useCameraNvrMutation(projectId, ({ nvrId, cameraId }: { nvrId: string; cameraId: string }) =>
+    api<Camera>(`/nvrs/${nvrId}/cameras/${cameraId}`, { method: 'DELETE' }),
+  );
 
 // -------------------------------------------------------------- Adjuntos
 export const useAttachments = (cameraId: string) =>

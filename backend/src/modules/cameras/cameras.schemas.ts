@@ -9,6 +9,8 @@ const nullable = <T extends z.ZodTypeAny>(schema: T) =>
 const cameraFields = {
   floor_plan_id: uuid,
   nvr_id: nullable(uuid),
+  // Sin canal: la BD asigna el primero libre del NVR
+  channel: nullable(z.number().int().min(1).max(1024)),
   code: z.string().trim().min(1).max(50),
   name: z.string().trim().min(1).max(120),
   type: z.enum(CAMERA_TYPES),

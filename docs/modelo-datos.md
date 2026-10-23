@@ -47,12 +47,24 @@ Histórico de cada imagen subida: `floor_plan_id, version, storage_key, mime_typ
 ### `nvrs`
 `project_id, name (único por proyecto), brand, model, ip_address inet, channels, location, notes`.
 
+`channels` es obligatorio al crear (API). Los NVR anteriores a la migración 004 pueden tenerlo vacío: «capacidad sin definir», sin validación hasta que se rellene; una vez definido no se puede vaciar.
+
+**Capacidad (migración 004, en la BD)** — se cumple aunque varios técnicos asignen a la vez, porque el trigger bloquea la fila del NVR (`FOR UPDATE`):
+- Un NVR no admite más cámaras que `channels` y la cámara debe ser del mismo proyecto que el NVR.
+- El canal está entre 1 y `channels` y no se repite dentro del NVR (`UNIQUE (nvr_id, channel)`).
+- Sin canal indicado se asigna el primero libre; al cambiar de NVR se conserva si está libre en el destino.
+- No se pueden reducir los canales por debajo de las cámaras asociadas ni del canal más alto en uso.
+- Al quitar el NVR (o borrarlo) el canal queda vacío.
+- Los errores usan SQLSTATE propios `NV001`…`NV005` y la API los devuelve como **409** con el mensaje tal cual.
+- Al aplicar la migración, las cámaras ya asociadas se numeran por código; si un NVR antiguo tenía más cámaras que canales se respeta y la aplicación lo muestra como «Sobrecapacidad».
+
 ### `cameras`
 | Campo | Tipo | Notas |
 |---|---|---|
 | project_id | uuid FK | desnormalizado: filtros rápidos y `UNIQUE (project_id, code)` |
 | floor_plan_id | uuid FK (cascade) | |
 | nvr_id | uuid FK (set null) | NVR asociado |
+| channel | int > 0 | canal del NVR; único por NVR; vacío si no hay NVR (ver `nvrs`) |
 | code | text | código/ID; autogenerado `CAM-001…` si no se indica |
 | name | text | |
 | type | `camera_type` | `domo` · `bullet` · `ptz` · `termica` · `lpr` |

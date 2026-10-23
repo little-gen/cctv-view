@@ -22,6 +22,12 @@ interface EditorState {
   coverageMode: CoverageMode;
   coverageOnlyOperational: boolean;
   sidebarOpen: boolean;
+  /** Pestaña del panel lateral */
+  sidebarTab: 'camaras' | 'topologia';
+  /** NVR resaltado en el plano (id o NO_NVR); el nonce repite el encuadre */
+  nvrHighlight: { id: string; nonce: number } | null;
+  /** Mostrar solo las cámaras del NVR resaltado */
+  nvrOnly: boolean;
 
   select: (id: string | null) => void;
   /** Centra, hace zoom y resalta una cámara; `select` abre además su ficha */
@@ -32,6 +38,10 @@ interface EditorState {
   resetFilters: () => void;
   toggle: (key: 'showCones' | 'showLabels' | 'coverageOnlyOperational' | 'sidebarOpen') => void;
   setCoverageMode: (m: CoverageMode) => void;
+  setSidebarTab: (t: EditorState['sidebarTab']) => void;
+  /** Resalta las cámaras de un NVR (null lo quita) y encuadra el plano en ellas */
+  highlightNvr: (id: string | null) => void;
+  setNvrOnly: (v: boolean) => void;
 }
 
 const EMPTY_FILTERS: CameraFilters = { q: '', statuses: [], types: [], brands: [] };
@@ -46,6 +56,9 @@ export const useEditor = create<EditorState>((set) => ({
   coverageMode: 'none',
   coverageOnlyOperational: true,
   sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 1024 : true,
+  sidebarTab: 'camaras',
+  nvrHighlight: null,
+  nvrOnly: false,
 
   select: (id) => set({ selectedId: id }),
   focusCamera: (id, select = true) =>
@@ -56,6 +69,9 @@ export const useEditor = create<EditorState>((set) => ({
   resetFilters: () => set({ filters: EMPTY_FILTERS }),
   toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<EditorState>),
   setCoverageMode: (coverageMode) => set({ coverageMode }),
+  setSidebarTab: (sidebarTab) => set({ sidebarTab }),
+  highlightNvr: (id) => set(id ? { nvrHighlight: { id, nonce: Date.now() } } : { nvrHighlight: null, nvrOnly: false }),
+  setNvrOnly: (nvrOnly) => set({ nvrOnly }),
 }));
 
 /** Alterna un valor dentro de un array (para chips de filtro). */
